@@ -108,7 +108,7 @@ async def init_db():
                 )
             """)
 
-            # Inserir estatísticas iniciais (cada INSERT separado)
+            # Inserir estatísticas iniciais
             await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('vendas','0') ON CONFLICT (chave) DO NOTHING")
             await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('faturamento','0.0') ON CONFLICT (chave) DO NOTHING")
             await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('vendas_hoje','0') ON CONFLICT (chave) DO NOTHING")
@@ -257,7 +257,6 @@ async def db_set_stat(chave: str, valor: str):
 
 async def db_incrementar_venda(preco: float):
     async with db_pool.acquire() as conn:
-        # Executar comandos separadamente
         await conn.execute("UPDATE estatisticas SET valor=(valor::NUMERIC+1)::TEXT WHERE chave='vendas'")
         await conn.execute("UPDATE estatisticas SET valor=(valor::NUMERIC+$1)::TEXT WHERE chave='faturamento'", preco)
         await conn.execute("UPDATE estatisticas SET valor=(valor::NUMERIC+1)::TEXT WHERE chave='vendas_hoje'")
@@ -352,20 +351,61 @@ async def montar_embed_vendas():
 
 async def montar_embed_loja():
     produtos = await db_listar_produtos()
-    embed = Embed(title="🛒 NEXZY STORE",
-                  description="💎 Compre automaticamente via PIX",
-                  color=Color.dark_blue())
+    
+    # Embed principal com visual bonito
+    embed = Embed(
+        title="✨ **NEXZY STORE** ✨",
+        description="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                   "**🎉 A MELHOR EXPERIÊNCIA DE COMPRAS 🎉**\n"
+                   "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                   "```fix\n✔️ Pagamento via PIX (Instantâneo)\n✔️ Entrega automática na DM\n✔️ Suporte 24/7\n✔️ 100% Seguro e Confiável```\n"
+                   "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        color=0x5865F2
+    )
+    
+    # Banner
     embed.set_image(url="https://media.discordapp.net/attachments/1491808878562643998/1491808965170958396/e6876514-c5ae-477f-a84b-d7b7db0c01e5.png")
-
-    for k, p in produtos.items():
-        estoque_txt = "∞ Ilimitado" if p["estoque"] == -1 else (
-            f"✅ {p['estoque']} em estoque" if p["estoque"] > 0 else "❌ Esgotado"
-        )
+    
+    # Footer
+    embed.set_footer(text="⭐ Nexzy Store • A Loja Oficial ⭐", icon_url=bot.user.avatar.url if bot.user.avatar else None)
+    
+    embed.timestamp = datetime.now(timezone.utc)
+    
+    if not produtos:
         embed.add_field(
-            name=f"{p.get('emoji','🛒')} {p['nome']}",
-            value=f"💰 R$ {formatar_preco(p['preco'])}\n📦 {estoque_txt}\n🆔 ID: `{k}`",
+            name="📢 **SEM PRODUTOS**",
+            value="```diff\n- Nenhum produto cadastrado ainda!\n+ Aguarde novidades em breve...```",
+            inline=False
+        )
+        return embed
+    
+    # Lista de produtos em formato elegante
+    for pid, prod in produtos.items():
+        estoque_texto = "∞" if prod["estoque"] == -1 else str(prod["estoque"])
+        
+        value = (
+            f"```ml\n"
+            f"💰 Preço: R$ {formatar_preco(prod['preco'])}\n"
+            f"📦 Estoque: {estoque_texto}\n"
+            f"🆔 ID: {pid}\n"
+            f"```"
+        )
+        
+        embed.add_field(
+            name=f"{prod.get('emoji', '🛒')} **{prod['nome']}**",
+            value=value,
             inline=True
         )
+    
+    # Guia rápido
+    embed.add_field(
+        name="━━━━━━━━━━━━━━━━━━━━",
+        value="**📌 COMO COMPRAR?**\n"
+              "```\n1️⃣ Clique no botão COMPRAR\n2️⃣ Escolha seu produto\n3️⃣ Efetue o PIX\n4️⃣ Receba o link na DM```"
+              "\n💬 **Precisa de ajuda?** Contate um administrador!",
+        inline=False
+    )
+    
     return embed
 
 # ================= VIEWS =================
@@ -421,7 +461,7 @@ class PainelPrincipal(discord.ui.View):
 
 class AdminView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)
     
     @discord.ui.button(label="➕ Adicionar Produto", style=discord.ButtonStyle.success)
     async def add_produto(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -440,7 +480,7 @@ class AdminView(discord.ui.View):
         view = discord.ui.View(timeout=60)
         select = discord.ui.Select(placeholder="Selecione um produto para editar...")
         for pid, prod in produtos.items():
-            select.add_option(label=f"{prod['nome']} - R$ {prod['preco']}", value=pid, emoji=prod.get('emoji', '🛒'))
+            select.add_option(label=f"{prod['nome']} - R$ {formatar_preco(prod['preco'])}", value=pid, emoji=prod.get('emoji', '🛒'))
         
         async def select_callback(interaction: discord.Interaction):
             await interaction.response.send_modal(EditarProdutoModal(select.values[0]))
@@ -458,12 +498,13 @@ class AdminView(discord.ui.View):
         view = discord.ui.View(timeout=60)
         select = discord.ui.Select(placeholder="Selecione um produto para remover...")
         for pid, prod in produtos.items():
-            select.add_option(label=f"{prod['nome']} - R$ {prod['preco']}", value=pid, emoji=prod.get('emoji', '🛒'))
+            select.add_option(label=f"{prod['nome']} - R$ {formatar_preco(prod['preco'])}", value=pid, emoji=prod.get('emoji', '🛒'))
         
         async def select_callback(interaction: discord.Interaction):
             await db_remover_produto(select.values[0])
             await interaction.response.send_message("✅ Produto removido com sucesso!", ephemeral=True)
             await atualizar_painel_loja()
+            await atualizar_painel_vendas()
         
         select.callback = select_callback
         view.add_item(select)
