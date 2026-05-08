@@ -19,8 +19,8 @@ from aiohttp import web
 
 # ================= CONFIG =================
 CARGO_DONO    = int(os.getenv("CARGO_DONO", "0"))
-CANAL_LOJA    = int(os.getenv("CANAL_LOJA", "1491798819958948000"))     # Canal da loja (produtos)
-CANAL_VENDAS  = int(os.getenv("CANAL_VENDAS", "1494068657762996325"))   # Canal de estatísticas
+CANAL_LOJA    = int(os.getenv("CANAL_LOJA", "0"))
+CANAL_VENDAS  = int(os.getenv("CANAL_VENDAS", "0"))
 CANAL_FALHAS  = int(os.getenv("CANAL_FALHAS", "0"))
 WEBHOOK_LOG   = os.getenv("WEBHOOK_LOG", "")
 DISCORD_TOKEN = os.getenv("LOJA_DISCORD_TOKEN")
@@ -54,11 +54,15 @@ async def init_db():
     try:
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
         async with db_pool.acquire() as conn:
+            # Tabela schema_version
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS schema_version (
                     versao INTEGER PRIMARY KEY
-                );
+                )
+            """)
 
+            # Tabela produtos
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS produtos (
                     id          TEXT PRIMARY KEY,
                     nome        TEXT NOT NULL,
@@ -68,8 +72,11 @@ async def init_db():
                     estoque     INTEGER DEFAULT -1,
                     vendas      INTEGER DEFAULT 0,
                     criado_em   TIMESTAMPTZ DEFAULT NOW()
-                );
+                )
+            """)
 
+            # Tabela pedidos
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS pedidos (
                     id              TEXT PRIMARY KEY,
                     user_id         BIGINT NOT NULL,
@@ -82,23 +89,33 @@ async def init_db():
                     tentativas      INTEGER DEFAULT 0,
                     criado_em       TIMESTAMPTZ DEFAULT NOW(),
                     atualizado_em   TIMESTAMPTZ DEFAULT NOW()
-                );
+                )
+            """)
 
+            # Tabela estatisticas
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS estatisticas (
                     chave TEXT PRIMARY KEY,
                     valor TEXT NOT NULL
-                );
+                )
+            """)
 
+            # Tabela painel_ids
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS painel_ids (
                     nome   TEXT PRIMARY KEY,
                     msg_id BIGINT NOT NULL
-                );
-
-                INSERT INTO estatisticas (chave, valor)
-                VALUES ('vendas','0'),('faturamento','0.0'),('vendas_hoje','0'),('faturamento_hoje','0.0'),('ultima_reset','')
-                ON CONFLICT (chave) DO NOTHING;
+                )
             """)
+
+            # Inserir estatísticas iniciais (cada INSERT separado)
+            await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('vendas','0') ON CONFLICT (chave) DO NOTHING")
+            await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('faturamento','0.0') ON CONFLICT (chave) DO NOTHING")
+            await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('vendas_hoje','0') ON CONFLICT (chave) DO NOTHING")
+            await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('faturamento_hoje','0.0') ON CONFLICT (chave) DO NOTHING")
+            await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('ultima_reset','') ON CONFLICT (chave) DO NOTHING")
             
+            # Verificar versão do schema
             row = await conn.fetchrow("SELECT versao FROM schema_version LIMIT 1")
             versao_atual = row["versao"] if row else 0
 
@@ -108,11 +125,9 @@ async def init_db():
             if versao_atual < 2:
                 await conn.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tentativas INTEGER DEFAULT 0")
             if versao_atual < 3:
-                await conn.execute("""
-                    INSERT INTO estatisticas (chave, valor)
-                    VALUES ('vendas_hoje','0'),('faturamento_hoje','0.0'),('ultima_reset','')
-                    ON CONFLICT (chave) DO NOTHING
-                """)
+                await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('vendas_hoje','0') ON CONFLICT (chave) DO NOTHING")
+                await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('faturamento_hoje','0.0') ON CONFLICT (chave) DO NOTHING")
+                await conn.execute("INSERT INTO estatisticas (chave, valor) VALUES ('ultima_reset','') ON CONFLICT (chave) DO NOTHING")
 
             await conn.execute("""
                 INSERT INTO schema_version (versao) VALUES ($1)
@@ -242,20 +257,18 @@ async def db_set_stat(chave: str, valor: str):
 
 async def db_incrementar_venda(preco: float):
     async with db_pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE estatisticas SET valor=(valor::NUMERIC+1)::TEXT   WHERE chave='vendas';
-            UPDATE estatisticas SET valor=(valor::NUMERIC+$1)::TEXT  WHERE chave='faturamento';
-            UPDATE estatisticas SET valor=(valor::NUMERIC+1)::TEXT   WHERE chave='vendas_hoje';
-            UPDATE estatisticas SET valor=(valor::NUMERIC+$1)::TEXT  WHERE chave='faturamento_hoje';
-        """, preco)
+        # Executar comandos separadamente
+        await conn.execute("UPDATE estatisticas SET valor=(valor::NUMERIC+1)::TEXT WHERE chave='vendas'")
+        await conn.execute("UPDATE estatisticas SET valor=(valor::NUMERIC+$1)::TEXT WHERE chave='faturamento'", preco)
+        await conn.execute("UPDATE estatisticas SET valor=(valor::NUMERIC+1)::TEXT WHERE chave='vendas_hoje'")
+        await conn.execute("UPDATE estatisticas SET valor=(valor::NUMERIC+$1)::TEXT WHERE chave='faturamento_hoje'", preco)
 
 async def db_reset_stats_diarias():
     async with db_pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE estatisticas SET valor='0'   WHERE chave='vendas_hoje';
-            UPDATE estatisticas SET valor='0.0' WHERE chave='faturamento_hoje';
-            UPDATE estatisticas SET valor=$1    WHERE chave='ultima_reset';
-        """, datetime.now(timezone.utc).isoformat())
+        await conn.execute("UPDATE estatisticas SET valor='0' WHERE chave='vendas_hoje'")
+        await conn.execute("UPDATE estatisticas SET valor='0.0' WHERE chave='faturamento_hoje'")
+        await conn.execute("UPDATE estatisticas SET valor=$1 WHERE chave='ultima_reset'", 
+                          datetime.now(timezone.utc).isoformat())
 
 async def db_get_painel_id(nome: str) -> int | None:
     async with db_pool.acquire() as conn:
@@ -306,7 +319,6 @@ def registrar_cooldown(user_id: int):
 
 # ================= EMBEDS =================
 async def montar_embed_vendas():
-    """Painel de estatísticas de vendas"""
     vendas           = await db_get_stat("vendas")
     faturamento      = await db_get_stat("faturamento")
     vendas_hoje      = await db_get_stat("vendas_hoje")
@@ -339,7 +351,6 @@ async def montar_embed_vendas():
     return embed
 
 async def montar_embed_loja():
-    """Painel da loja com produtos"""
     produtos = await db_listar_produtos()
     embed = Embed(title="🛒 NEXZY STORE",
                   description="💎 Compre automaticamente via PIX",
@@ -632,7 +643,6 @@ async def montar_embed_admin():
     return embed
 
 async def atualizar_painel_vendas():
-    """Atualiza o painel de estatísticas no canal de vendas"""
     canal = bot.get_channel(CANAL_VENDAS)
     if not canal:
         print(f"⚠️ Canal de vendas {CANAL_VENDAS} não encontrado!")
@@ -650,7 +660,6 @@ async def atualizar_painel_vendas():
     await db_set_painel_id("vendas", msg.id)
 
 async def atualizar_painel_loja():
-    """Atualiza o painel da loja no canal da loja"""
     canal = bot.get_channel(CANAL_LOJA)
     if not canal:
         print(f"⚠️ Canal da loja {CANAL_LOJA} não encontrado!")
@@ -834,7 +843,6 @@ async def on_ready():
     print(f"👑 Cargo Dono: {CARGO_DONO}")
     print(f"⚠️ Canal Falhas: {CANAL_FALHAS}")
     
-    # Tentar conectar ao banco
     await init_db()
     
     if db_pool is None:
