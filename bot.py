@@ -18,10 +18,10 @@ from datetime import datetime, timezone, timedelta
 from aiohttp import web
 
 # ================= CONFIG =================
-CARGO_DONO    = int(os.getenv("CARGO_DONO", "0"))
-CANAL_LOJA    = int(os.getenv("CANAL_LOJA", "0"))
-CANAL_VENDAS  = int(os.getenv("CANAL_VENDAS", "0"))
-CANAL_FALHAS  = int(os.getenv("CANAL_FALHAS", "0"))
+CARGO_DONO    = int(os.getenv("CARGO_DONO", "1486353931087908874"))
+CANAL_LOJA    = int(os.getenv("CANAL_LOJA", "1491798819958948000"))
+CANAL_VENDAS  = int(os.getenv("CANAL_VENDAS", "1494068657762996325"))
+CANAL_FALHAS  = int(os.getenv("CANAL_FALHAS", "1492726744514428980"))
 WEBHOOK_LOG   = os.getenv("WEBHOOK_LOG", "")
 DISCORD_TOKEN = os.getenv("LOJA_DISCORD_TOKEN")
 MP_TOKEN      = os.getenv("MERCADO_PAGO_TOKEN")
@@ -352,7 +352,6 @@ async def montar_embed_vendas():
 async def montar_embed_loja():
     produtos = await db_listar_produtos()
     
-    # Embed principal com visual bonito
     embed = Embed(
         title="✨ **NEXZY STORE** ✨",
         description="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -363,12 +362,8 @@ async def montar_embed_loja():
         color=0x5865F2
     )
     
-    # Banner
     embed.set_image(url="https://media.discordapp.net/attachments/1491808878562643998/1491808965170958396/e6876514-c5ae-477f-a84b-d7b7db0c01e5.png")
-    
-    # Footer
-    embed.set_footer(text="⭐ Nexzy Store • A Loja Oficial ⭐", icon_url=bot.user.avatar.url if bot.user.avatar else None)
-    
+    embed.set_footer(text="⭐ Nexzy Store • A Loja Oficial ⭐")
     embed.timestamp = datetime.now(timezone.utc)
     
     if not produtos:
@@ -379,7 +374,6 @@ async def montar_embed_loja():
         )
         return embed
     
-    # Lista de produtos em formato elegante
     for pid, prod in produtos.items():
         estoque_texto = "∞" if prod["estoque"] == -1 else str(prod["estoque"])
         
@@ -397,7 +391,6 @@ async def montar_embed_loja():
             inline=True
         )
     
-    # Guia rápido quando há produtos
     embed.add_field(
         name="━━━━━━━━━━━━━━━━━━━━",
         value="**📌 COMO COMPRAR?**\n"
@@ -457,7 +450,11 @@ class PainelPrincipal(discord.ui.View):
     async def btn_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not eh_dono(interaction):
             return await interaction.response.send_message("❌ Apenas administradores podem acessar.", ephemeral=True)
-        await interaction.response.send_message(embed=await montar_embed_admin(), view=AdminView(), ephemeral=True)
+        
+        # Criar uma nova view para admin
+        admin_embed = await montar_embed_admin()
+        admin_view = AdminView()
+        await interaction.response.send_message(embed=admin_embed, view=admin_view, ephemeral=True)
 
 class AdminView(discord.ui.View):
     def __init__(self):
@@ -465,11 +462,9 @@ class AdminView(discord.ui.View):
     
     @discord.ui.button(label="➕ Adicionar Produto", style=discord.ButtonStyle.success)
     async def add_produto(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            await interaction.response.send_modal(AdicionarProdutoModal())
-        except Exception as e:
-            print(f"Erro ao abrir modal: {e}")
-            await interaction.response.send_message("❌ Erro ao abrir formulário. Tente novamente.", ephemeral=True)
+        # Criar modal diretamente
+        modal = AdicionarProdutoModal()
+        await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="✏️ Editar Produto", style=discord.ButtonStyle.primary)
     async def edit_produto(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -477,15 +472,18 @@ class AdminView(discord.ui.View):
         if not produtos:
             return await interaction.response.send_message("❌ Nenhum produto cadastrado.", ephemeral=True)
         
-        view = discord.ui.View(timeout=60)
+        # Criar select para edição
         select = discord.ui.Select(placeholder="Selecione um produto para editar...")
         for pid, prod in produtos.items():
             select.add_option(label=f"{prod['nome']} - R$ {formatar_preco(prod['preco'])}", value=pid, emoji=prod.get('emoji', '🛒'))
         
         async def select_callback(interaction: discord.Interaction):
-            await interaction.response.send_modal(EditarProdutoModal(select.values[0]))
+            modal = EditarProdutoModal(select.values[0])
+            await interaction.response.send_modal(modal)
         
         select.callback = select_callback
+        
+        view = discord.ui.View()
         view.add_item(select)
         await interaction.response.send_message("Selecione o produto:", view=view, ephemeral=True)
     
@@ -495,7 +493,6 @@ class AdminView(discord.ui.View):
         if not produtos:
             return await interaction.response.send_message("❌ Nenhum produto cadastrado.", ephemeral=True)
         
-        view = discord.ui.View(timeout=60)
         select = discord.ui.Select(placeholder="Selecione um produto para remover...")
         for pid, prod in produtos.items():
             select.add_option(label=f"{prod['nome']} - R$ {formatar_preco(prod['preco'])}", value=pid, emoji=prod.get('emoji', '🛒'))
@@ -507,6 +504,8 @@ class AdminView(discord.ui.View):
             await atualizar_painel_vendas()
         
         select.callback = select_callback
+        
+        view = discord.ui.View()
         view.add_item(select)
         await interaction.response.send_message("Selecione o produto para remover:", view=view, ephemeral=True)
     
@@ -525,36 +524,34 @@ class AdicionarProdutoModal(discord.ui.Modal, title="Adicionar Produto"):
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            await interaction.response.defer(ephemeral=True)
             preco_float = float(self.preco.value.replace(",", "."))
             estoque_int = int(self.estoque.value)
             await db_adicionar_produto(self.pid.value, self.nome.value, preco_float, self.emoji.value, self.link.value, estoque_int)
-            await interaction.followup.send(f"✅ Produto `{self.pid.value}` adicionado!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Produto `{self.pid.value}` adicionado!", ephemeral=True)
             await atualizar_painel_loja()
             await atualizar_painel_vendas()
         except Exception as e:
-            await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
 class EditarProdutoModal(discord.ui.Modal, title="Editar Produto"):
     def __init__(self, produto_id):
         super().__init__()
         self.produto_id = produto_id
-        
-        self.nome = discord.ui.TextInput(label="Nome", required=True)
-        self.preco = discord.ui.TextInput(label="Preço", required=True)
-        self.estoque = discord.ui.TextInput(label="Estoque (-1 = Ilimitado)", required=True)
+        self.add_item(discord.ui.TextInput(label="Nome", placeholder="Nome do produto", required=True))
+        self.add_item(discord.ui.TextInput(label="Preço", placeholder="19.90", required=True))
+        self.add_item(discord.ui.TextInput(label="Estoque (-1 = Ilimitado)", placeholder="-1", required=False, default="-1"))
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            await interaction.response.defer(ephemeral=True)
-            preco_float = float(self.preco.value.replace(",", "."))
-            estoque_int = int(self.estoque.value)
-            await db_editar_produto(self.produto_id, self.nome.value, preco_float, estoque_int)
-            await interaction.followup.send(f"✅ Produto `{self.produto_id}` editado!", ephemeral=True)
+            nome = self.children[0].value
+            preco = float(self.children[1].value.replace(",", "."))
+            estoque = int(self.children[2].value)
+            await db_editar_produto(self.produto_id, nome, preco, estoque)
+            await interaction.response.send_message(f"✅ Produto `{self.produto_id}` editado!", ephemeral=True)
             await atualizar_painel_loja()
             await atualizar_painel_vendas()
         except Exception as e:
-            await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
 async def processar_compra(interaction: discord.Interaction, key: str):
     restante = verificar_cooldown(interaction.user.id)
@@ -627,6 +624,7 @@ async def verificar_pagamento(payment_id, pedido_id, user, produto, produto_key)
                     await atualizar_painel_loja()
                 else:
                     await db_marcar_falha_entrega(pedido_id)
+                    await notificar_falha(user, produto, produto_key)
                 return
             elif status in ["cancelled", "refunded"]:
                 await db_marcar_expirado(pedido_id)
@@ -651,9 +649,32 @@ async def tentar_entregar(user, produto, produto_id, pid) -> bool:
     
     try:
         await user.send(embed=embed)
+        await enviar_log("venda", user, produto, produto["preco"], "Entregue com sucesso")
         return True
     except:
+        await enviar_log("erro", user, produto, produto["preco"], "Falha ao enviar DM")
         return False
+
+async def notificar_falha(user, produto, produto_id):
+    """Notifica no canal de falhas"""
+    canal = bot.get_channel(CANAL_FALHAS)
+    if not canal:
+        print(f"⚠️ Canal de falhas {CANAL_FALHAS} não encontrado!")
+        return
+    
+    embed = Embed(
+        title="⚠️ FALHA NA ENTREGA",
+        description=f"O pagamento foi aprovado mas não foi possível entregar o produto.",
+        color=Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="👤 Usuário", value=f"{user.mention} ({user.id})", inline=False)
+    embed.add_field(name="📦 Produto", value=produto['nome'], inline=True)
+    embed.add_field(name="💰 Valor", value=f"R$ {formatar_preco(produto['preco'])}", inline=True)
+    embed.add_field(name="🆔 ID do Pedido", value=f"`{produto_id}`", inline=False)
+    embed.set_footer(text="Nexzy Store • Sistema Automático")
+    
+    await canal.send(embed=embed)
 
 async def enviar_log(tipo, usuario=None, produto=None, valor=None, extra=None):
     if not WEBHOOK_LOG:
@@ -684,38 +705,63 @@ async def montar_embed_admin():
     return embed
 
 async def atualizar_painel_vendas():
+    """Atualiza o painel de estatísticas no canal de vendas"""
     canal = bot.get_channel(CANAL_VENDAS)
     if not canal:
-        print(f"⚠️ Canal de vendas {CANAL_VENDAS} não encontrado!")
+        print(f"⚠️ Canal de vendas {CANAL_VENDAS} não encontrado! Verifique se o ID está correto.")
         return
-    embed = await montar_embed_vendas()
-    msg_id = await db_get_painel_id("vendas")
+    
     try:
+        embed = await montar_embed_vendas()
+        
+        # Buscar mensagem existente
+        msg_id = await db_get_painel_id("vendas")
+        
         if msg_id:
-            msg = await canal.fetch_message(msg_id)
-            await msg.edit(embed=embed)
-            return
-    except:
-        pass
-    msg = await canal.send(embed=embed)
-    await db_set_painel_id("vendas", msg.id)
+            try:
+                msg = await canal.fetch_message(msg_id)
+                await msg.edit(embed=embed)
+                print(f"✅ Painel de vendas atualizado no canal {canal.name}")
+                return
+            except:
+                pass
+        
+        # Enviar nova mensagem
+        msg = await canal.send(embed=embed)
+        await db_set_painel_id("vendas", msg.id)
+        print(f"✅ Painel de vendas enviado para {canal.name}")
+    except Exception as e:
+        print(f"❌ Erro ao atualizar painel de vendas: {e}")
 
 async def atualizar_painel_loja():
+    """Atualiza o painel da loja no canal da loja"""
     canal = bot.get_channel(CANAL_LOJA)
     if not canal:
-        print(f"⚠️ Canal da loja {CANAL_LOJA} não encontrado!")
+        print(f"⚠️ Canal da loja {CANAL_LOJA} não encontrado! Verifique se o ID está correto.")
         return
-    embed = await montar_embed_loja()
-    msg_id = await db_get_painel_id("loja")
+    
     try:
+        embed = await montar_embed_loja()
+        view = PainelPrincipal()
+        
+        # Buscar mensagem existente
+        msg_id = await db_get_painel_id("loja")
+        
         if msg_id:
-            msg = await canal.fetch_message(msg_id)
-            await msg.edit(embed=embed, view=PainelPrincipal())
-            return
-    except:
-        pass
-    msg = await canal.send(embed=embed, view=PainelPrincipal())
-    await db_set_painel_id("loja", msg.id)
+            try:
+                msg = await canal.fetch_message(msg_id)
+                await msg.edit(embed=embed, view=view)
+                print(f"✅ Painel da loja atualizado no canal {canal.name}")
+                return
+            except:
+                pass
+        
+        # Enviar nova mensagem
+        msg = await canal.send(embed=embed, view=view)
+        await db_set_painel_id("loja", msg.id)
+        print(f"✅ Painel da loja enviado para {canal.name}")
+    except Exception as e:
+        print(f"❌ Erro ao atualizar painel da loja: {e}")
 
 # ================= TASKS =================
 @tasks.loop(minutes=2)
@@ -763,6 +809,7 @@ async def webhook_handler(request):
                             await atualizar_painel_loja()
                         else:
                             await db_marcar_falha_entrega(pedido_id)
+                            await notificar_falha(user, produto, pedido_id)
         
         return web.Response(status=200, text="OK")
     except Exception as e:
@@ -789,100 +836,82 @@ async def cmd_loja(ctx):
     embed = await montar_embed_loja()
     view = PainelPrincipal()
     await ctx.send(embed=embed, view=view)
-    
-    try:
-        await ctx.message.delete()
-    except:
-        pass
+    await ctx.message.delete()
 
 @bot.command(name="vendas")
 async def cmd_vendas(ctx):
     """Envia o painel de vendas no canal atual"""
     embed = await montar_embed_vendas()
     await ctx.send(embed=embed)
-    try:
-        await ctx.message.delete()
-    except:
-        pass
+    await ctx.message.delete()
 
-@bot.command(name="lojaadmin")
+@bot.command(name="admin")
 @commands.has_role(CARGO_DONO)
-async def cmd_lojaadmin(ctx):
+async def cmd_admin(ctx):
     """Envia o painel admin no canal atual (apenas donos)"""
     embed = await montar_embed_admin()
-    await ctx.send(embed=embed, view=AdminView())
-    try:
-        await ctx.message.delete()
-    except:
-        pass
-
-@bot.command(name="sync")
-@commands.has_role(CARGO_DONO)
-async def sync_commands(ctx):
-    """Sincroniza os comandos (apenas donos)"""
-    await ctx.send("✅ Comandos disponíveis: `!loja`, `!vendas`, `!lojaadmin`, `!testar`, `!sync`", delete_after=10)
-    try:
-        await ctx.message.delete()
-    except:
-        pass
+    view = AdminView()
+    await ctx.send(embed=embed, view=view)
+    await ctx.message.delete()
 
 @bot.command(name="testar")
 async def testar_config(ctx):
     """Testa se as configurações estão corretas"""
     embed = Embed(title="🔧 Teste de Configuração", color=Color.blue())
     
-    cargo = ctx.guild.get_role(CARGO_DONO)
-    embed.add_field(
-        name="Cargo Dono", 
-        value=f"{cargo.mention if cargo else '❌ Não encontrado'}\nID: `{CARGO_DONO}`",
-        inline=False
-    )
-    
+    # Testar canais
     canal_loja = bot.get_channel(CANAL_LOJA)
+    canal_vendas = bot.get_channel(CANAL_VENDAS)
+    canal_falhas = bot.get_channel(CANAL_FALHAS)
+    cargo = ctx.guild.get_role(CARGO_DONO)
+    
     embed.add_field(
-        name="Canal da Loja (Produtos)", 
+        name="🛒 Canal da Loja",
         value=f"{canal_loja.mention if canal_loja else '❌ Não encontrado'}\nID: `{CANAL_LOJA}`",
         inline=False
     )
     
-    canal_vendas = bot.get_channel(CANAL_VENDAS)
     embed.add_field(
-        name="Canal de Vendas (Estatísticas)", 
+        name="📊 Canal de Vendas",
         value=f"{canal_vendas.mention if canal_vendas else '❌ Não encontrado'}\nID: `{CANAL_VENDAS}`",
         inline=False
     )
     
-    canal_falhas = bot.get_channel(CANAL_FALHAS)
     embed.add_field(
-        name="Canal Falhas", 
+        name="⚠️ Canal de Falhas",
         value=f"{canal_falhas.mention if canal_falhas else '❌ Não encontrado'}\nID: `{CANAL_FALHAS}`",
         inline=False
     )
     
-    tem_cargo = any(r.id == CARGO_DONO for r in ctx.author.roles)
     embed.add_field(
-        name="Seu Status", 
-        value="✅ Você é dono" if tem_cargo else "❌ Você NÃO é dono",
+        name="👑 Cargo Dono",
+        value=f"{cargo.mention if cargo else '❌ Não encontrado'}\nID: `{CARGO_DONO}`",
         inline=False
     )
     
-    produtos = await db_listar_produtos()
     embed.add_field(
         name="📦 Produtos Cadastrados",
-        value=str(len(produtos)) if produtos else "0 - Use o botão Admin para adicionar",
+        value=str(len(await db_listar_produtos())) if await db_listar_produtos() else "0",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="✅ Status",
+        value="Bot funcionando corretamente!" if canal_loja and canal_vendas else "⚠️ Alguns canais não foram encontrados!",
         inline=False
     )
     
     await ctx.send(embed=embed)
+    await ctx.message.delete()
 
 # ================= EVENTOS =================
 @bot.event
 async def on_ready():
     print(f"✅ Bot logado como {bot.user}")
-    print(f"🛒 Canal da Loja (Produtos): {CANAL_LOJA}")
-    print(f"📊 Canal de Vendas (Estatísticas): {CANAL_VENDAS}")
+    print(f"🛒 Canal da Loja: {CANAL_LOJA}")
+    print(f"📊 Canal de Vendas: {CANAL_VENDAS}")
+    print(f"⚠️ Canal de Falhas: {CANAL_FALHAS}")
     print(f"👑 Cargo Dono: {CARGO_DONO}")
-    print(f"⚠️ Canal Falhas: {CANAL_FALHAS}")
     
     await init_db()
     
@@ -890,36 +919,58 @@ async def on_ready():
         print("❌ Banco de dados não conectado!")
         return
     
-    # Verificar se há produtos, se não houver, criar produtos padrão
+    # Verificar canais
+    canal_loja = bot.get_channel(CANAL_LOJA)
+    canal_vendas = bot.get_channel(CANAL_VENDAS)
+    canal_falhas = bot.get_channel(CANAL_FALHAS)
+    
+    if not canal_loja:
+        print(f"❌ Canal da loja {CANAL_LOJA} NÃO ENCONTRADO! Verifique se o bot tem acesso.")
+    else:
+        print(f"✅ Canal da loja encontrado: #{canal_loja.name}")
+    
+    if not canal_vendas:
+        print(f"❌ Canal de vendas {CANAL_VENDAS} NÃO ENCONTRADO! Verifique se o bot tem acesso.")
+    else:
+        print(f"✅ Canal de vendas encontrado: #{canal_vendas.name}")
+    
+    if not canal_falhas:
+        print(f"❌ Canal de falhas {CANAL_FALHAS} NÃO ENCONTRADO! Verifique se o bot tem acesso.")
+    else:
+        print(f"✅ Canal de falhas encontrado: #{canal_falhas.name}")
+    
+    # Criar produtos padrão se não houver
     produtos = await db_listar_produtos()
     if not produtos:
-        print("📦 Nenhum produto encontrado. Criando produtos padrão...")
+        print("📦 Criando produtos padrão...")
         produtos_padrao = [
-            ("produto1", "VIP Bronze", 19.90, "🥉", "https://exemplo.com/bronze", -1),
-            ("produto2", "VIP Prata", 39.90, "🥈", "https://exemplo.com/prata", -1),
-            ("produto3", "VIP Ouro", 69.90, "🥇", "https://exemplo.com/ouro", -1),
-            ("produto4", "VIP Diamante", 99.90, "💎", "https://exemplo.com/diamante", -1),
-            ("produto5", "VIP Lenda", 199.90, "🏆", "https://exemplo.com/lenda", 5),
+            ("vip_bronze", "VIP Bronze", 19.90, "🥉", "https://exemplo.com/bronze", -1),
+            ("vip_prata", "VIP Prata", 39.90, "🥈", "https://exemplo.com/prata", -1),
+            ("vip_ouro", "VIP Ouro", 69.90, "🥇", "https://exemplo.com/ouro", -1),
+            ("vip_diamante", "VIP Diamante", 99.90, "💎", "https://exemplo.com/diamante", -1),
+            ("vip_lenda", "VIP Lenda", 199.90, "🏆", "https://exemplo.com/lenda", 5),
         ]
         for pid, nome, preco, emoji, link, estoque in produtos_padrao:
             try:
                 await db_adicionar_produto(pid, nome, preco, emoji, link, estoque)
-                print(f"  ✅ Produto {nome} criado")
+                print(f"  ✅ {nome} criado")
             except Exception as e:
                 print(f"  ❌ Erro ao criar {nome}: {e}")
-        print("✅ Produtos padrão criados!")
     
+    # Enviar painéis
     await atualizar_painel_loja()
     await atualizar_painel_vendas()
     
+    # Iniciar tasks
     atualizar_paineis.start()
     verificar_pedidos_expirados.start()
     reset_stats_diario.start()
     
+    # Iniciar webhook
     asyncio.create_task(start_webhook())
     
-    print(f"✅ Bot pronto! Use !loja para ver os produtos")
-    print(f"📌 Comandos disponíveis: !loja, !vendas, !testar, !lojaadmin")
+    print(f"✅ Bot pronto!")
+    print(f"📌 Use !loja para ver os produtos")
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
@@ -943,18 +994,17 @@ async def on_interaction(interaction: discord.Interaction):
 
 # ================= MAIN =================
 async def start_bot():
-    """Inicia o bot com tratamento de rate limit"""
     try:
         await bot.start(DISCORD_TOKEN)
     except discord.errors.HTTPException as e:
         if e.status == 429:
-            print("❌ Rate limit do Discord. Aguardando 30 segundos...")
+            print("❌ Rate limit. Aguardando 30 segundos...")
             await asyncio.sleep(30)
             await start_bot()
         else:
             raise e
     except Exception as e:
-        print(f"❌ Erro ao iniciar: {e}")
+        print(f"❌ Erro: {e}")
         raise e
 
 if __name__ == "__main__":
@@ -964,6 +1014,6 @@ if __name__ == "__main__":
     try:
         loop.run_until_complete(start_bot())
     except KeyboardInterrupt:
-        print("🛑 Bot desligado manualmente")
+        print("🛑 Bot desligado")
     finally:
         loop.close()
