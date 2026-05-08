@@ -1,3 +1,7 @@
+# bot.py - PRIMEIRA LINHA
+import sys
+if sys.version_info >= (3, 13):
+    import patch  # Importa o patch para Python 3.13
 import discord
 from discord.ext import commands, tasks
 from discord import Embed, Color
