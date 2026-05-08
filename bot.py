@@ -2,6 +2,7 @@
 import sys
 if sys.version_info >= (3, 13):
     import patch  # Importa o patch para Python 3.13
+
 import discord
 from discord.ext import commands, tasks
 from discord import Embed, Color
@@ -371,8 +372,26 @@ class SelecionarProduto(discord.ui.Select):
 class PainelPrincipal(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="💰 Comprar", style=discord.ButtonStyle.success, custom_id="btn_comprar"))
-        self.add_item(discord.ui.Button(label="📜 Meus Pedidos", style=discord.ButtonStyle.secondary, custom_id="btn_pedidos"))
+    
+    @discord.ui.button(label="💰 Comprar", style=discord.ButtonStyle.success, custom_id="btn_comprar")
+    async def btn_comprar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        produtos = await db_listar_produtos()
+        disponiveis = {k: v for k, v in produtos.items() if v["estoque"] != 0}
+        if not disponiveis:
+            return await interaction.response.send_message("❌ Nenhum produto disponível no momento.", ephemeral=True)
+        view = discord.ui.View()
+        view.add_item(SelecionarProduto(disponiveis))
+        await interaction.response.send_message("Selecione o produto desejado:", view=view, ephemeral=True)
+    
+    @discord.ui.button(label="📜 Meus Pedidos", style=discord.ButtonStyle.secondary, custom_id="btn_pedidos")
+    async def btn_pedidos(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pedidos = await db_pedidos_usuario(interaction.user.id)
+        if not pedidos:
+            return await interaction.response.send_message("📭 Você não tem nenhum pedido.", ephemeral=True)
+        embed = Embed(title="📜 Seus Pedidos", color=Color.blue())
+        for p in pedidos[:10]:
+            embed.add_field(name=f"{status_emoji(p['status'])} {p['produto_nome']}", value=f"ID: `{p['id']}`\nValor: R$ {formatar_preco(p['produto_preco'])}\nData: {p['criado_em'].strftime('%d/%m/%Y %H:%M')}", inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
     
     @discord.ui.button(label="🎁 Resgatar", style=discord.ButtonStyle.primary, custom_id="btn_resgatar", row=1)
     async def btn_resgatar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -438,11 +457,11 @@ class AdminView(discord.ui.View):
 class SelecionarProdutoEditar(discord.ui.View):
     def __init__(self, produtos: dict):
         super().__init__(timeout=60)
-        select = discord.ui.Select(placeholder="Selecione um produto...")
+        self.select = discord.ui.Select(placeholder="Selecione um produto...")
         for pid, prod in produtos.items():
-            select.add_option(label=f"{prod['nome']} - R$ {prod['preco']}", value=pid, emoji=prod.get('emoji', '🛒'))
-        select.callback = self.select_callback
-        self.add_item(select)
+            self.select.add_option(label=f"{prod['nome']} - R$ {prod['preco']}", value=pid, emoji=prod.get('emoji', '🛒'))
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
     
     async def select_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(EditarProdutoModal(self.select.values[0]))
@@ -450,11 +469,11 @@ class SelecionarProdutoEditar(discord.ui.View):
 class SelecionarProdutoRemover(discord.ui.View):
     def __init__(self, produtos: dict):
         super().__init__(timeout=60)
-        select = discord.ui.Select(placeholder="Selecione um produto...")
+        self.select = discord.ui.Select(placeholder="Selecione um produto...")
         for pid, prod in produtos.items():
-            select.add_option(label=f"{prod['nome']} - R$ {prod['preco']}", value=pid, emoji=prod.get('emoji', '🛒'))
-        select.callback = self.select_callback
-        self.add_item(select)
+            self.select.add_option(label=f"{prod['nome']} - R$ {prod['preco']}", value=pid, emoji=prod.get('emoji', '🛒'))
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
     
     async def select_callback(self, interaction: discord.Interaction):
         await db_remover_produto(self.select.values[0])
@@ -627,6 +646,7 @@ async def montar_embed_admin():
 async def atualizar_painel_privado():
     canal = bot.get_channel(CANAL_STATS)
     if not canal:
+        print(f"⚠️ Canal {CANAL_STATS} não encontrado!")
         return
     embed = await montar_embed_privado()
     msg_id = await db_get_painel_id("privado")
@@ -643,6 +663,7 @@ async def atualizar_painel_privado():
 async def atualizar_painel_loja():
     canal = bot.get_channel(CANAL_STATS)
     if not canal:
+        print(f"⚠️ Canal {CANAL_STATS} não encontrado!")
         return
     embed = await montar_embed_loja()
     msg_id = await db_get_painel_id("loja")
@@ -704,7 +725,8 @@ async def webhook_handler(request):
                             await db_marcar_falha_entrega(pedido_id)
         
         return web.Response(status=200, text="OK")
-    except:
+    except Exception as e:
+        print(f"Erro no webhook: {e}")
         return web.Response(status=500, text="Erro")
 
 async def start_webhook():
@@ -716,17 +738,106 @@ async def start_webhook():
     await site.start()
     print(f"✅ Webhook rodando na porta {os.getenv('PORT', '8080')}")
 
+# ================= COMANDOS =================
+@bot.command(name="loja")
+async def cmd_loja(ctx):
+    """Envia o painel da loja no canal atual"""
+    produtos = await db_listar_produtos()
+    if not produtos:
+        return await ctx.send("❌ Nenhum produto cadastrado ainda! Use o botão Admin para adicionar produtos.")
+    
+    embed = await montar_embed_loja()
+    view = PainelPrincipal()
+    await ctx.send(embed=embed, view=view)
+    
+    # Tenta deletar o comando (opcional)
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+@bot.command(name="lojaadmin")
+@commands.has_role(CARGO_DONO)
+async def cmd_lojaadmin(ctx):
+    """Envia o painel admin no canal atual (apenas donos)"""
+    embed = await montar_embed_admin()
+    await ctx.send(embed=embed, view=AdminView())
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+@bot.command(name="sync")
+@commands.has_role(CARGO_DONO)
+async def sync_commands(ctx):
+    """Sincroniza os comandos (apenas donos)"""
+    await ctx.send("✅ Comandos disponíveis: `!loja`, `!lojaadmin`, `!testar`, `!sync`", delete_after=10)
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+@bot.command(name="testar")
+async def testar_config(ctx):
+    """Testa se as configurações estão corretas"""
+    embed = Embed(title="🔧 Teste de Configuração", color=Color.blue())
+    
+    cargo = ctx.guild.get_role(CARGO_DONO)
+    embed.add_field(
+        name="Cargo Dono", 
+        value=f"{cargo.mention if cargo else '❌ Não encontrado'}\nID: `{CARGO_DONO}`",
+        inline=False
+    )
+    
+    canal_stats = bot.get_channel(CANAL_STATS)
+    embed.add_field(
+        name="Canal Stats (Loja)", 
+        value=f"{canal_stats.mention if canal_stats else '❌ Não encontrado'}\nID: `{CANAL_STATS}`",
+        inline=False
+    )
+    
+    canal_falhas = bot.get_channel(CANAL_FALHAS)
+    embed.add_field(
+        name="Canal Falhas", 
+        value=f"{canal_falhas.mention if canal_falhas else '❌ Não encontrado'}\nID: `{CANAL_FALHAS}`",
+        inline=False
+    )
+    
+    tem_cargo = any(r.id == CARGO_DONO for r in ctx.author.roles)
+    embed.add_field(
+        name="Seu Status", 
+        value="✅ Você é dono" if tem_cargo else "❌ Você NÃO é dono",
+        inline=False
+    )
+    
+    produtos = await db_listar_produtos()
+    embed.add_field(
+        name="📦 Produtos Cadastrados",
+        value=str(len(produtos)) if produtos else "0 - Use o botão Admin para adicionar",
+        inline=False
+    )
+    
+    await ctx.send(embed=embed)
+
 # ================= EVENTOS =================
 @bot.event
 async def on_ready():
     print(f"✅ Bot logado como {bot.user}")
+    print(f"📊 Canal Stats: {CANAL_STATS}")
+    print(f"👑 Cargo Dono: {CARGO_DONO}")
+    print(f"⚠️ Canal Falhas: {CANAL_FALHAS}")
+    
     await init_db()
     await atualizar_painel_loja()
     await atualizar_painel_privado()
+    
     atualizar_paineis.start()
     verificar_pedidos_expirados.start()
     reset_stats_diario.start()
+    
     asyncio.create_task(start_webhook())
+    
+    print(f"✅ Bot pronto! Use !loja para testar")
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
@@ -736,33 +847,17 @@ async def on_interaction(interaction: discord.Interaction):
         if custom_id.startswith("check_"):
             payment_id = int(custom_id.split("_")[1])
             await interaction.response.send_message("⏳ Verificando pagamento...", ephemeral=True)
-            payment_info = sdk.payment().get(payment_id)
-            if payment_info["response"].get("status") == "approved":
-                await interaction.edit_original_response(content="✅ Pagamento já foi aprovado! Verifique sua DM.", embed=None, view=None)
-            else:
-                await interaction.edit_original_response(content="⏳ Pagamento ainda não identificado. Aguarde alguns minutos.", embed=None, view=None)
+            try:
+                payment_info = sdk.payment().get(payment_id)
+                if payment_info["response"].get("status") == "approved":
+                    await interaction.edit_original_response(content="✅ Pagamento já foi aprovado! Verifique sua DM.", embed=None, view=None)
+                else:
+                    await interaction.edit_original_response(content="⏳ Pagamento ainda não identificado. Aguarde alguns minutos.", embed=None, view=None)
+            except:
+                await interaction.edit_original_response(content="❌ Erro ao verificar pagamento. Tente novamente mais tarde.", embed=None, view=None)
         
         elif custom_id.startswith("cancel_"):
             await interaction.response.send_message("❌ Pedido cancelado.", ephemeral=True)
-            await interaction.edit_original_response(content="❌ Compra cancelada.", embed=None, view=None)
-        
-        elif custom_id == "btn_comprar":
-            produtos = await db_listar_produtos()
-            disponiveis = {k: v for k, v in produtos.items() if v["estoque"] != 0}
-            if not disponiveis:
-                return await interaction.response.send_message("❌ Nenhum produto disponível no momento.", ephemeral=True)
-            view = discord.ui.View()
-            view.add_item(SelecionarProduto(disponiveis))
-            await interaction.response.send_message("Selecione o produto desejado:", view=view, ephemeral=True)
-        
-        elif custom_id == "btn_pedidos":
-            pedidos = await db_pedidos_usuario(interaction.user.id)
-            if not pedidos:
-                return await interaction.response.send_message("📭 Você não tem nenhum pedido.", ephemeral=True)
-            embed = Embed(title="📜 Seus Pedidos", color=Color.blue())
-            for p in pedidos[:10]:
-                embed.add_field(name=f"{status_emoji(p['status'])} {p['produto_nome']}", value=f"ID: `{p['id']}`\nValor: R$ {formatar_preco(p['produto_preco'])}\nData: {p['criado_em'].strftime('%d/%m/%Y %H:%M')}", inline=False)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ================= MAIN =================
 if __name__ == "__main__":
