@@ -71,7 +71,6 @@ def criar_embed(titulo="", descricao="", cor=COR_PRINCIPAL):
     return embed
 
 async def get_guild():
-    """Retorna o objeto Guild do servidor configurado"""
     return bot.get_guild(GUILD_ID)
 
 # ================= BANCO =================
@@ -243,10 +242,18 @@ async def criar_7z_criptografado(dados: bytes, nome_original: str, senha: str) -
     return await loop.run_in_executor(None, _criar_7z_sync, dados, nome_original, senha)
 
 # ================= ENTREGA VIA CANAL TEMPORÁRIO =================
-async def entregar_produto(user: discord.User, produto: dict, pedido_id: str, guild: discord.Guild):
-    prod_completo = await get_produto_completo(produto["id"])
-    tem_arquivo   = prod_completo and prod_completo["arquivo_data"]
-    senha_arquivo = gerar_senha_arquivo() if tem_arquivo else None
+async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arquivo_override: bytes = None, nome_arquivo_override: str = None):
+    """
+    Realiza a entrega em canal temporário.
+    Se dados_arquivo_override for fornecido, usa esses bytes (para testes) e ignora busca no banco.
+    """
+    if dados_arquivo_override is not None:
+        tem_arquivo = True
+        senha_arquivo = gerar_senha_arquivo()
+    else:
+        prod_completo = await get_produto_completo(produto["id"])
+        tem_arquivo   = prod_completo and prod_completo["arquivo_data"]
+        senha_arquivo = gerar_senha_arquivo() if tem_arquivo else None
 
     # Cria canal temporário
     overwrites = {
@@ -254,8 +261,6 @@ async def entregar_produto(user: discord.User, produto: dict, pedido_id: str, gu
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
         user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
     }
-    # Adiciona permissão para o cargo de dono (se existir) também ver? Opcional, mas vou deixar admin ver por padrão.
-    # Vou buscar o cargo CARGO_DONO para dar acesso também.
     cargo_dono = guild.get_role(CARGO_DONO)
     if cargo_dono:
         overwrites[cargo_dono] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
@@ -268,16 +273,14 @@ async def entregar_produto(user: discord.User, produto: dict, pedido_id: str, gu
             reason=f"Canal temporário de entrega para {user.name} (pedido {pedido_id})"
         )
     except discord.Forbidden:
-        print("❌ Permissão insuficiente para criar canal.")
-        # fallback: tentar enviar por DM (se ainda quiser)
         try:
-            embed = criar_embed(titulo="⚠️ Erro na entrega", descricao="Não foi possível criar seu canal de entrega. Entre em contato com o suporte.", cor=COR_ERRO)
+            embed = criar_embed(titulo="⚠️ Erro na entrega", descricao="Não foi possível criar seu canal de entrega. Contate o suporte.", cor=COR_ERRO)
             await user.send(embed=embed)
         except:
             pass
         return
 
-    # Enviar mensagem de boas-vindas e embed com instruções
+    # Mensagem de entrega
     embed = criar_embed(
         titulo="🖤 COMPRA APROVADA — NEXZY STORE",
         descricao=f"Olá **{user.display_name}**, seu produto foi entregue neste canal temporário.\n"
@@ -300,26 +303,29 @@ async def entregar_produto(user: discord.User, produto: dict, pedido_id: str, gu
                   "**2.** Instale o **7-Zip** (gratuito em 7-zip.org)\n"
                   "**3.** Clique com botão direito → *7-Zip → Extrair aqui*\n"
                   "**4.** Digite a senha acima quando solicitado\n"
-                  "⚠️ Este arquivo é **exclusivo** para esta compra.",
+                  "⚠️ Arquivo **exclusivo** para esta compra.",
             inline=False
         )
         try:
-            dados_cifrados = await criar_7z_criptografado(
-                bytes(prod_completo["arquivo_data"]),
-                prod_completo["arquivo_nome"],
-                senha_arquivo
-            )
+            if dados_arquivo_override is not None:
+                dados_raw = dados_arquivo_override
+                nome_original = nome_arquivo_override or "arquivo_nexzy"
+            else:
+                dados_raw = bytes(prod_completo["arquivo_data"])
+                nome_original = prod_completo["arquivo_nome"]
+
+            dados_cifrados = await criar_7z_criptografado(dados_raw, nome_original, senha_arquivo)
             nome_saida = f"nexzy_{produto['id']}_{pedido_id[:8]}.7z"
             arquivo_discord = discord.File(fp=io.BytesIO(dados_cifrados), filename=nome_saida)
             await canal_temp.send(embed=embed, file=arquivo_discord)
         except Exception as e:
             print(f"Erro criptografia: {e}")
-            embed.add_field(name="⚠️ Arquivo", value="Erro ao gerar. Entre em contato com o suporte.", inline=False)
+            embed.add_field(name="⚠️ Arquivo", value="Erro ao gerar. Contate o suporte.", inline=False)
             await canal_temp.send(embed=embed)
     else:
         embed.add_field(
             name="📋 Próximos passos",
-            value="Seu produto foi ativado! Entre em contato se precisar de ajuda.",
+            value="Seu produto foi ativado! Contate o suporte se precisar.",
             inline=False
         )
         await canal_temp.send(embed=embed)
@@ -331,12 +337,15 @@ async def entregar_produto(user: discord.User, produto: dict, pedido_id: str, gu
             await canal_temp.delete(reason="Canal temporário expirado")
         except:
             pass
-
     asyncio.create_task(remover_canal())
 
-    # Registrar venda e logs
-    await registrar_venda_realizada(pedido_id, user.id, produto["nome"], produto["preco"])
-    await log_venda(pedido_id, user, produto["nome"], produto["preco"], senha_arquivo)
+    # Registrar venda e logs (exceto para teste, onde o pedido_id começa com "TESTE-")
+    if not pedido_id.startswith("TESTE-"):
+        await registrar_venda_realizada(pedido_id, user.id, produto["nome"], produto["preco"])
+        await log_venda(pedido_id, user, produto["nome"], produto["preco"], senha_arquivo)
+    else:
+        # Log de teste
+        await log_admin("Teste de Entrega", user, f"Pedido teste: `{pedido_id}` | Produto: {produto['nome']}")
 
 # ================= MODALS =================
 class ProdutoModal(discord.ui.Modal, title="✨ Adicionar Produto"):
@@ -450,20 +459,19 @@ class ConfirmacaoLimpezaView(discord.ui.View):
         await limpar_banco_completo()
         await atualizar_loja()
         await atualizar_vendas()
-        await log_admin("🗑️ Banco de Dados Limpo", interaction.user, 
-            "**TODO** o banco de dados foi limpo.", cor=COR_ERRO)
-        embed = criar_embed(titulo="✅ Banco de Dados Limpo", descricao="Todas as tabelas foram limpas com sucesso!", cor=COR_SUCESSO)
+        await log_admin("🗑️ Banco de Dados Limpo", interaction.user, "**TODO** o banco foi limpo.", cor=COR_ERRO)
+        embed = criar_embed(titulo="✅ Banco de Dados Limpo", descricao="Sucesso!", cor=COR_SUCESSO)
         await self.interaction_original.edit_original_response(embed=embed, view=None)
-        await interaction.followup.send("✅ Banco limpo com sucesso!", ephemeral=True)
+        await interaction.followup.send("✅ Banco limpo!", ephemeral=True)
 
     @discord.ui.button(label="❌ CANCELAR", style=discord.ButtonStyle.secondary)
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.interaction_original.user.id:
             return await interaction.response.send_message("❌ Apenas quem iniciou pode cancelar.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
-        embed = criar_embed(titulo="❌ Limpeza Cancelada", descricao="O banco de dados **não** foi alterado.", cor=COR_DESTAQUE)
+        embed = criar_embed(titulo="❌ Limpeza Cancelada", descricao="Banco não alterado.", cor=COR_DESTAQUE)
         await self.interaction_original.edit_original_response(embed=embed, view=None)
-        await interaction.followup.send("✅ Operação cancelada.", ephemeral=True)
+        await interaction.followup.send("✅ Cancelado.", ephemeral=True)
 
 class LojaButtons(discord.ui.View):
     def __init__(self):
@@ -487,10 +495,10 @@ class LojaButtons(discord.ui.View):
         embed.add_field(name="✏️ Editar", value="Altera nome/preço/emoji", inline=True)
         embed.add_field(name="🗑️ Remover", value="Remove produto", inline=True)
         embed.add_field(name="📂 Ver Arquivos", value="Visualiza arquivos do banco", inline=True)
-        embed.add_field(name="🧹 Limpar Banco", value="Limpa TODO o banco de dados", inline=True)
-        embed.add_field(name="🧪 Teste de Entrega", value="Simula compra", inline=True)
+        embed.add_field(name="🧹 Limpar Banco", value="Limpa TODO o banco", inline=True)
+        embed.add_field(name="🧪 Teste de Entrega", value="Testa envio c/ arquivo .txt", inline=True)
         embed.add_field(name="📊 Estatísticas", value="Ver faturamento", inline=True)
-        embed.add_field(name="📂 Upload", value="`!upload <id>` com arquivo anexado", inline=True)
+        embed.add_field(name="📂 Upload", value="`!upload <id>` com arquivo", inline=True)
         await interaction.response.send_message(embed=embed, view=AdminView(), ephemeral=True)
 
 class AdminView(discord.ui.View):
@@ -527,7 +535,7 @@ class AdminView(discord.ui.View):
         if not rows:
             embed = criar_embed(titulo="📂 Arquivos no Banco de Dados", descricao="*Nenhum arquivo encontrado.*", cor=COR_DESTAQUE)
             return await interaction.followup.send(embed=embed, ephemeral=True)
-        embed = criar_embed(titulo="📂 Arquivos no Banco de Dados", descricao=f"**{len(rows)}** arquivo(s) encontrado(s):", cor=COR_DESTAQUE)
+        embed = criar_embed(titulo="📂 Arquivos no Banco", descricao=f"**{len(rows)}** arquivo(s):", cor=COR_DESTAQUE)
         total_bytes = 0
         for row in rows:
             tamanho_mb = row["tamanho_bytes"] / (1024 * 1024)
@@ -541,7 +549,7 @@ class AdminView(discord.ui.View):
     async def limpar_banco(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = criar_embed(
             titulo="⚠️ CONFIRMAÇÃO DE LIMPEZA",
-            descricao="**ATENÇÃO!** Esta ação irá:\n\n🗑️ Remover **TODOS** os produtos\n🗑️ Remover **TODOS** os pedidos\n🗑️ Remover **TODOS** os arquivos\n🗑️ Remover **TODO** histórico\n🗑️ Zerar **TODAS** estatísticas\n\n⚠️ **IRREVERSÍVEL!**",
+            descricao="**IRREVERSÍVEL!** Apagará todos produtos, pedidos, arquivos e estatísticas.",
             cor=COR_ERRO
         )
         view = ConfirmacaoLimpezaView(interaction)
@@ -550,17 +558,31 @@ class AdminView(discord.ui.View):
     @discord.ui.button(label="🧪 Teste de Entrega", style=discord.ButtonStyle.secondary)
     async def teste(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        produtos = await get_produtos()
-        if not produtos:
-            return await interaction.followup.send("❌ Nenhum produto.", ephemeral=True)
-        produto   = dict(list(produtos.values())[0])
-        pedido_id = f"TESTE-{str(uuid.uuid4())[:8]}"
         guild = interaction.guild or await get_guild()
         if guild is None:
             return await interaction.followup.send("❌ Servidor não encontrado.", ephemeral=True)
-        await interaction.followup.send("⏳ Criando canal de teste...", ephemeral=True)
-        await entregar_produto(interaction.user, produto, pedido_id, guild)
-        await interaction.edit_original_response(content="✅ Canal de teste criado! Verifique o canal temporário.")
+
+        # Cria um arquivo de teste (txt) com conteúdo simples
+        conteudo_teste = b"Esse e um arquivo de teste da Nexzy Store.\nSe voce esta vendo isso, a entrega funcionou!\nObrigado por testar."
+        produto_teste = {
+            "id": "teste_nexzy",
+            "nome": "Produto de Teste",
+            "preco": 0.0,
+            "emoji": "🧪",
+            "descricao": "Teste do sistema de entrega com arquivo criptografado"
+        }
+        pedido_id = f"TESTE-{str(uuid.uuid4())[:8]}"
+
+        await interaction.followup.send("⏳ Criando canal de teste com arquivo .txt criptografado...", ephemeral=True)
+        await entregar_produto(
+            interaction.user,
+            produto_teste,
+            pedido_id,
+            guild,
+            dados_arquivo_override=conteudo_teste,
+            nome_arquivo_override="teste_nexzy.txt"
+        )
+        await interaction.edit_original_response(content="✅ Canal de teste criado! Verifique o canal temporário com o arquivo.")
 
     @discord.ui.button(label="📊 Estatísticas", style=discord.ButtonStyle.secondary)
     async def stats(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -600,23 +622,22 @@ async def iniciar_pagamento(interaction: discord.Interaction, produto_id: str):
         )
         embed.add_field(name="🏢 Destinatário", value="**NEXZY STORE**", inline=True)
         embed.add_field(name="⏰ Validade", value="**30 minutos**", inline=True)
-        embed.add_field(name="📋 Código PIX — Copia e Cola", value=f"```\n{pix[:300]}\n```", inline=False)
+        embed.add_field(name="📋 Código PIX", value=f"```\n{pix[:300]}\n```", inline=False)
         embed.add_field(
             name="📱 Como Pagar",
-            value="**1.** Copie o código\n**2.** Abra seu banco\n**3.** PIX → Copia e Cola\n**4.** Cole e confirme\n**5.** Clique em ✅ **JÁ PAGUEI**",
+            value="1. Copie o código\n2. PIX no seu banco\n3. Clique em ✅ JÁ PAGUEI",
             inline=False
         )
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="✅ JÁ PAGUEI", style=discord.ButtonStyle.success, custom_id=f"check_{pay_id}"))
-        view.add_item(discord.ui.Button(label="❌ CANCELAR",  style=discord.ButtonStyle.danger,  custom_id=f"cancel_{pay_id}"))
+        view.add_item(discord.ui.Button(label="❌ CANCELAR", style=discord.ButtonStyle.danger, custom_id=f"cancel_{pay_id}"))
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-        # Obtém guild para passar ao verificador
         guild = interaction.guild or await get_guild()
         asyncio.create_task(verificar_pagamento(pay_id, pedido_id, interaction.user, produto, guild))
     except Exception as e:
         print(f"Erro PIX: {e}")
-        await interaction.followup.send(f"❌ Erro ao gerar PIX: {str(e)[:200]}", ephemeral=True)
+        await interaction.followup.send(f"❌ Erro: {str(e)[:200]}", ephemeral=True)
 
 async def verificar_pagamento(payment_id, pedido_id, user, produto, guild):
     for _ in range(30):
@@ -790,7 +811,7 @@ async def on_ready():
         print("✅ 7-Zip disponível")
     guild = await get_guild()
     if guild is None:
-        print(f"❌ Servidor com ID {GUILD_ID} não encontrado! Configure GUILD_ID corretamente.")
+        print(f"❌ Servidor com ID {GUILD_ID} não encontrado! Configure GUILD_ID.")
     else:
         print(f"✅ Servidor principal: {guild.name}")
     asyncio.create_task(start_server())
@@ -810,9 +831,9 @@ async def on_interaction(interaction: discord.Interaction):
             info   = sdk.payment().get(pay_id)
             status = info["response"].get("status")
             msgs   = {
-                "approved": "✅ **Pagamento aprovado!** Um canal exclusivo foi criado para você.",
-                "pending":  "⏳ Ainda **pendente**. Aguarde o banco processar.",
-                "rejected": "❌ Pagamento **recusado**. Tente novamente."
+                "approved": "✅ Pagamento aprovado! Canal exclusivo criado.",
+                "pending":  "⏳ Ainda pendente.",
+                "rejected": "❌ Recusado."
             }
             await interaction.followup.send(msgs.get(status, f"ℹ️ Status: `{status}`"), ephemeral=True)
         except:
