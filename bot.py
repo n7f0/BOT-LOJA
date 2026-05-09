@@ -1,4 +1,4 @@
-# bot.py - VERSÃO COM PIX EM MENSAGEM SEPARADA
+# bot.py - VERSÃO FINAL COM PIX COPIA E COLA
 import discord
 from discord.ext import commands
 from discord import Embed, Color
@@ -228,15 +228,21 @@ async def iniciar_pagamento(interaction: discord.Interaction, produto_id):
         pedido_id = str(uuid.uuid4())
         await add_pedido(pedido_id, interaction.user.id, produto_id, produto["nome"], produto["preco"])
         
-        qr_text = resp["point_of_interaction"]["transaction_data"]["qr_code_base64"]
+        # Usando o campo correto: qr_code (código copia e cola)
+        pix_copia_cola = resp["point_of_interaction"]["transaction_data"]["qr_code"]
         payment_id = resp["id"]
         pedidos_pendentes[payment_id] = pedido_id
         
-        # Embed sem o código PIX
         embed = Embed(
             title="💳 **PAGAMENTO PIX**", 
             description=f"**{produto['nome']}**\n{formatar_preco(produto['preco'])}", 
             color=Color.green()
+        )
+        
+        embed.add_field(
+            name="📋 **CÓDIGO PIX (Copia e Cola)**",
+            value=f"```\n{pix_copia_cola}\n```",
+            inline=False
         )
         
         embed.add_field(
@@ -247,7 +253,7 @@ async def iniciar_pagamento(interaction: discord.Interaction, produto_id):
         
         embed.add_field(
             name="📋 **COMO PAGAR**",
-            value="1️⃣ Copie o código PIX abaixo\n"
+            value="1️⃣ Copie o código acima\n"
                   "2️⃣ Abra seu app do banco\n"
                   "3️⃣ Escolha pagar via PIX\n"
                   "4️⃣ Cole o código\n"
@@ -262,16 +268,7 @@ async def iniciar_pagamento(interaction: discord.Interaction, produto_id):
         view.add_item(discord.ui.Button(label="✅ JÁ PAGUEI", style=discord.ButtonStyle.success, custom_id=f"check_{payment_id}"))
         view.add_item(discord.ui.Button(label="❌ CANCELAR", style=discord.ButtonStyle.danger, custom_id=f"cancel_{payment_id}"))
         
-        # Envia o embed
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        
-        # Envia o código PIX como mensagem separada
-        await interaction.followup.send("**📱 SEU CÓDIGO PIX (Copiar e Colar):**", ephemeral=True)
-        
-        # Dividir o código em partes de 1500 caracteres
-        partes = [qr_text[i:i+1500] for i in range(0, len(qr_text), 1500)]
-        for parte in partes:
-            await interaction.followup.send(f"```\n{parte}\n```", ephemeral=True)
         
         asyncio.create_task(verificar_pagamento(payment_id, pedido_id, interaction.user, produto))
         
@@ -404,7 +401,7 @@ async def on_interaction(interaction: discord.Interaction):
             await interaction.response.send_modal(ProdutoModal())
         elif custom_id == "remove_prod":
             produtos = await get_produtos()
-            if not produtos:
+            if not produits:
                 return await interaction.response.send_message("❌ Sem produtos", ephemeral=True)
             view = discord.ui.View()
             view.add_item(RemoverSelect(produtos))
