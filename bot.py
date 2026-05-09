@@ -1,4 +1,4 @@
-# bot.py - COM ID AUTOMÁTICO
+# bot.py - VERSÃO CORRIGIDA
 import discord
 from discord.ext import commands
 from discord import Embed, Color
@@ -59,14 +59,21 @@ async def init_db():
     try:
         db = await asyncpg.create_pool(DATABASE_URL)
         async with db.acquire() as conn:
+            # Recriar tabela produtos sem NOT NULL no link
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS produtos (
                     id TEXT PRIMARY KEY,
                     nome TEXT NOT NULL,
                     preco REAL NOT NULL,
-                    emoji TEXT DEFAULT '🛒'
+                    emoji TEXT DEFAULT '🛒',
+                    link TEXT DEFAULT ''
                 )
             """)
+            
+            # Garantir que a coluna link aceita nulos
+            await conn.execute("ALTER TABLE produtos ALTER COLUMN link DROP NOT NULL")
+            await conn.execute("UPDATE produtos SET link = '' WHERE link IS NULL")
+            
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS pedidos (
                     id TEXT PRIMARY KEY,
@@ -86,13 +93,14 @@ async def init_db():
                 )
             """)
             
-            await conn.execute("INSERT INTO vendas (id, total, quantidade) VALUES (1, 0, 0) ON CONFLICT DO NOTHING")
+            await conn.execute("INSERT INTO vendas (id, total, quantidade) VALUES (1, 0, 0) ON CONFLICT (id) DO NOTHING")
             
+            # Verificar se tem produtos
             existing = await conn.fetch("SELECT * FROM produtos")
             if not existing:
-                await conn.execute("INSERT INTO produtos VALUES ('prod1', 'VIP Bronze', 19.90, '🥉')")
-                await conn.execute("INSERT INTO produtos VALUES ('prod2', 'VIP Prata', 39.90, '🥈')")
-                await conn.execute("INSERT INTO produtos VALUES ('prod3', 'VIP Ouro', 69.90, '🥇')")
+                await conn.execute("INSERT INTO produtos (id, nome, preco, emoji) VALUES ('prod1', 'VIP Bronze', 19.90, '🥉')")
+                await conn.execute("INSERT INTO produtos (id, nome, preco, emoji) VALUES ('prod2', 'VIP Prata', 39.90, '🥈')")
+                await conn.execute("INSERT INTO produtos (id, nome, preco, emoji) VALUES ('prod3', 'VIP Ouro', 69.90, '🥇')")
                 print("✅ Produtos exemplo criados")
         
         print("✅ Banco de dados conectado!")
@@ -103,12 +111,12 @@ async def init_db():
 
 async def get_produtos():
     async with db.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM produtos")
-        return {r["id"]: dict(r) for r in rows}
+        rows = await conn.fetch("SELECT id, nome, preco, emoji FROM produtos")
+        return {r["id"]: {"id": r["id"], "nome": r["nome"], "preco": r["preco"], "emoji": r["emoji"]} for r in rows}
 
 async def add_produto(pid, nome, preco, emoji):
     async with db.acquire() as conn:
-        await conn.execute("INSERT INTO produtos VALUES ($1,$2,$3,$4)", pid, nome, preco, emoji)
+        await conn.execute("INSERT INTO produtos (id, nome, preco, emoji) VALUES ($1,$2,$3,$4)", pid, nome, preco, emoji)
 
 async def remove_produto(pid):
     async with db.acquire() as conn:
@@ -116,7 +124,7 @@ async def remove_produto(pid):
 
 async def add_pedido(pid, user_id, produto_id, nome, preco):
     async with db.acquire() as conn:
-        await conn.execute("INSERT INTO pedidos VALUES ($1,$2,$3,$4,$5,'pendente',NOW())", pid, user_id, produto_id, nome, preco)
+        await conn.execute("INSERT INTO pedidos (id, user_id, produto_id, produto_nome, produto_preco) VALUES ($1,$2,$3,$4,$5)", pid, user_id, produto_id, nome, preco)
 
 async def update_pedido(pid, status):
     async with db.acquire() as conn:
@@ -138,12 +146,11 @@ def formatar_preco(valor):
 def gerar_key():
     return secrets.token_hex(16)
 
-# ================= MODAL COM ID AUTOMÁTICO =================
+# ================= MODAL =================
 class ProdutoModal(discord.ui.Modal, title="✨ Adicionar Produto"):
-    # Só precisa preencher nome, preço e emoji
     nome_input = discord.ui.TextInput(
         label="📦 Nome do Produto",
-        placeholder="Ex: VIP Premium, Cargo Especial",
+        placeholder="Ex: VIP Premium",
         required=True,
         max_length=100
     )
@@ -166,20 +173,17 @@ class ProdutoModal(discord.ui.Modal, title="✨ Adicionar Produto"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            # Gerar ID aleatório automaticamente
             produto_id = gerar_id_aleatorio()
             nome = self.nome_input.value
             preco = float(self.preco_input.value.replace(",", "."))
             emoji = self.emoji_input.value or "🛒"
             
-            # Verificar se o ID já existe (muito raro, mas possível)
             produtos = await get_produtos()
             while produto_id in produtos:
                 produto_id = gerar_id_aleatorio()
             
             await add_produto(produto_id, nome, preco, emoji)
             
-            # Mostrar o ID gerado para o admin
             embed = Embed(title="✅ Produto Adicionado!", color=Color.green())
             embed.add_field(name="🆔 ID Gerado", value=f"`{produto_id}`", inline=False)
             embed.add_field(name="📦 Nome", value=nome, inline=True)
