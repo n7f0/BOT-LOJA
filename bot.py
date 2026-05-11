@@ -1,4 +1,4 @@
-# bot.py - NEXZY STORE - VERSÃO FINAL CORRIGIDA (SINTAXE OK)
+# bot.py - NEXZY STORE - FINAL CORRIGIDO (titulo)
 import discord
 from discord.ext import commands
 from discord import Embed, Color
@@ -633,8 +633,8 @@ async def verificar_pagamento(payment_id, pedido_id, user, produto, guild):
 # ================= EMBEDS LOJA / VENDAS =================
 async def montar_embed_loja():
     produtos = await get_produtos()
-    embed = criar_embed(title="**🖤  N E X Z Y  S T O R E**",
-                        description="╔══════════════════════════╗\n💎 **Compre via PIX e receba em canal exclusivo!**\n🔐 Arquivo criptografado + senha única\n╚══════════════════════════╝",
+    embed = criar_embed(titulo="**🖤  N E X Z Y  S T O R E**",
+                        descricao="╔══════════════════════════╗\n💎 **Compre via PIX e receba em canal exclusivo!**\n🔐 Arquivo criptografado + senha única\n╚══════════════════════════╝",
                         cor=0x1a1a1a)
     for pid, p in produtos.items():
         desc = p.get("descricao") or ""
@@ -715,7 +715,7 @@ async def start_server():
     await site.start()
     print("✅ Servidor HTTP ativo")
 
-# ================= COMANDOS (try/except corrigidos) =================
+# ================= COMANDOS =================
 @bot.command(name="loja")
 async def cmd_loja(ctx):
     await ctx.send(embed=await montar_embed_loja(), view=LojaButtons())
@@ -796,8 +796,10 @@ async def on_ready():
     else:
         print(f"✅ Servidor: {guild.name}")
     asyncio.create_task(start_server())
-    await atualizar_loja()
-    await atualizar_vendas()
+    # só atualiza loja/vendas se guild existir
+    if guild:
+        await atualizar_loja()
+        await atualizar_vendas()
     print("✅ Pronto!")
 
 @bot.event
