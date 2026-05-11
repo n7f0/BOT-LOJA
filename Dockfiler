@@ -7,8 +7,6 @@ RUN apt-get update && apt-get install -y \
     p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y p7zip-full
-
 WORKDIR /app
 
 # Copia e instala dependências Python
@@ -17,7 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia o código do bot
 COPY bot.py .
-COPY patch.py .
 
-# Comando com loop infinito (reinicia automaticamente se o bot falhar)
+# Comando com restart automático
 CMD ["sh", "-c", "while true; do python bot.py; echo 'Bot caiu, reiniciando em 5 segundos...'; sleep 5; done"]
