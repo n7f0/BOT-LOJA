@@ -259,7 +259,6 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
             if arquivo_data is not None:
                 tem_arquivo = True
                 senha_arquivo = gerar_senha_arquivo()
-                # asyncpg retorna memoryview, não bytes → conversão correta
                 if isinstance(arquivo_data, memoryview):
                     dados_raw = arquivo_data.tobytes()
                 elif isinstance(arquivo_data, (bytes, bytearray)):
@@ -268,7 +267,6 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
                     dados_raw = bytes(arquivo_data)
                 nome_original = arquivo_nome or f"produto_{produto['id']}"
 
-    # Criar canal temporário
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
@@ -289,10 +287,10 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
         try:
             embed = criar_embed(titulo="⚠️ Erro na entrega", descricao="Não foi possível criar o canal.", cor=COR_ERRO)
             await user.send(embed=embed)
-        except: pass
+        except:
+            pass
         return
 
-    # Embed de entrega (visual melhorado)
     embed = discord.Embed(
         title="🖤  NEXZY STORE — COMPRA APROVADA",
         description=(
@@ -336,7 +334,6 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
             print(f"❌ Erro criptografia: {e}")
             embed.add_field(name="⚠️  Problema na entrega", value="Houve um erro. O suporte foi notificado.", inline=False)
             await canal_temp.send(embed=embed)
-            # Notifica admin
             canal_admin = bot.get_channel(CANAL_LOG_ADMIN)
             if canal_admin:
                 await canal_admin.send(embed=criar_embed(
@@ -350,14 +347,14 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
         embed.timestamp = datetime.utcnow()
         await canal_temp.send(embed=embed)
 
-    # Exclusão após 30 minutos
     async def remover_canal():
         await asyncio.sleep(1800)
-        try: await canal_temp.delete(reason="Canal de entrega expirado")
-        except: pass
+        try:
+            await canal_temp.delete(reason="Canal de entrega expirado")
+        except:
+            pass
     asyncio.create_task(remover_canal())
 
-    # Registros
     if not pedido_id.startswith("TESTE-"):
         await registrar_venda_realizada(pedido_id, user.id, produto["nome"], produto["preco"])
         await log_venda(pedido_id, user, produto["nome"], produto["preco"], senha_arquivo)
@@ -456,12 +453,17 @@ class ConfirmacaoLimpezaView(discord.ui.View):
     def __init__(self, interaction_original):
         super().__init__(timeout=60)
         self.interaction_original = interaction_original
+
     async def on_timeout(self):
-        try: await self.interaction_original.edit_original_response(content="⏰ Tempo expirado.", embed=None, view=None)
-        except: pass
+        try:
+            await self.interaction_original.edit_original_response(content="⏰ Tempo expirado.", embed=None, view=None)
+        except:
+            pass
+
     @discord.ui.button(label="✅ CONFIRMAR LIMPEZA", style=discord.ButtonStyle.danger, emoji="⚠️")
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.interaction_original.user.id: return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
+        if interaction.user.id != self.interaction_original.user.id:
+            return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         await limpar_banco_completo()
         await atualizar_loja()
@@ -470,9 +472,11 @@ class ConfirmacaoLimpezaView(discord.ui.View):
         embed = criar_embed(titulo="✅ Banco de Dados Limpo", descricao="Tudo foi removido.", cor=COR_SUCESSO)
         await self.interaction_original.edit_original_response(embed=embed, view=None)
         await interaction.followup.send("✅ Limpo!", ephemeral=True)
+
     @discord.ui.button(label="❌ CANCELAR", style=discord.ButtonStyle.secondary)
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.interaction_original.user.id: return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
+        if interaction.user.id != self.interaction_original.user.id:
+            return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         embed = criar_embed(titulo="❌ Cancelado", descricao="Banco intacto.", cor=COR_DESTAQUE)
         await self.interaction_original.edit_original_response(embed=embed, view=None)
@@ -483,12 +487,16 @@ class LojaButtons(discord.ui.View):
     @discord.ui.button(label="💰 Comprar", style=discord.ButtonStyle.success, emoji="🛒")
     async def comprar(self, interaction: discord.Interaction, button: discord.ui.Button):
         produtos = await get_produtos()
-        if not produtos: return await interaction.response.send_message("❌ Nenhum produto disponível.", ephemeral=True)
-        view = discord.ui.View(); view.add_item(ProdutoSelect(produtos))
+        if not produtos:
+            return await interaction.response.send_message("❌ Nenhum produto disponível.", ephemeral=True)
+        view = discord.ui.View()
+        view.add_item(ProdutoSelect(produtos))
         await interaction.response.send_message("📦 **Selecione o produto:**", view=view, ephemeral=True)
+
     @discord.ui.button(label="👑 Admin", style=discord.ButtonStyle.danger, emoji="⚙️")
     async def admin(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not any(r.id == CARGO_DONO for r in interaction.user.roles): return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
+        if not any(r.id == CARGO_DONO for r in interaction.user.roles):
+            return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
         embed = criar_embed(titulo="⚙️ Painel Admin", cor=COR_ERRO)
         embed.add_field(name="➕ Adicionar", value="Cadastra produto", inline=True)
         embed.add_field(name="✏️ Editar", value="Altera produto", inline=True)
@@ -503,19 +511,27 @@ class LojaButtons(discord.ui.View):
 class AdminView(discord.ui.View):
     def __init__(self): super().__init__(timeout=120)
     @discord.ui.button(label="➕ Adicionar", style=discord.ButtonStyle.success)
-    async def add(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_modal(ProdutoModal())
+    async def add(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ProdutoModal())
+
     @discord.ui.button(label="✏️ Editar", style=discord.ButtonStyle.primary)
     async def editar(self, interaction: discord.Interaction, button: discord.ui.Button):
         produtos = await get_produtos()
-        if not produtos: return await interaction.response.send_message("❌ Nenhum produto.", ephemeral=True)
-        view = discord.ui.View(); view.add_item(EditarSelect(produtos))
+        if not produtos:
+            return await interaction.response.send_message("❌ Nenhum produto.", ephemeral=True)
+        view = discord.ui.View()
+        view.add_item(EditarSelect(produtos))
         await interaction.response.send_message("✏️ Selecione o produto:", view=view, ephemeral=True)
+
     @discord.ui.button(label="🗑️ Remover", style=discord.ButtonStyle.danger)
     async def remover(self, interaction: discord.Interaction, button: discord.ui.Button):
         produtos = await get_produtos()
-        if not produtos: return await interaction.response.send_message("❌ Nenhum produto.", ephemeral=True)
-        view = discord.ui.View(); view.add_item(RemoverSelect(produtos))
+        if not produtos:
+            return await interaction.response.send_message("❌ Nenhum produto.", ephemeral=True)
+        view = discord.ui.View()
+        view.add_item(RemoverSelect(produtos))
         await interaction.response.send_message("🗑️ Selecione o produto:", view=view, ephemeral=True)
+
     @discord.ui.button(label="📂 Ver Arquivos", style=discord.ButtonStyle.secondary)
     async def ver_arquivos(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
@@ -532,22 +548,26 @@ class AdminView(discord.ui.View):
             embed.add_field(name=f"📦 {row['nome']} (`{row['id']}`)", value=f"📄 `{row['arquivo_nome']}`\n📏 {mb:.2f} MB", inline=False)
         embed.add_field(name="📊 Total", value=f"**{len(rows)}** arquivos • **{total/1024/1024:.2f} MB**", inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
+
     @discord.ui.button(label="🧹 Limpar Banco", style=discord.ButtonStyle.danger)
     async def limpar_banco(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = criar_embed(titulo="⚠️ CONFIRMAÇÃO", descricao="**IRREVERSÍVEL!** Apagará tudo.", cor=COR_ERRO)
         view = ConfirmacaoLimpezaView(interaction)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
     @discord.ui.button(label="🧪 Teste de Entrega", style=discord.ButtonStyle.secondary)
     async def teste(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild or await get_guild()
-        if not guild: return await interaction.followup.send("❌ Servidor não encontrado.", ephemeral=True)
+        if not guild:
+            return await interaction.followup.send("❌ Servidor não encontrado.", ephemeral=True)
         conteudo = b"Arquivo de teste da Nexzy Store.\nSe voce esta vendo isso, a entrega funcionou!"
         produto_teste = {"id":"teste","nome":"Produto de Teste","preco":0.0,"emoji":"🧪"}
         pedido_id = f"TESTE-{uuid.uuid4().hex[:8]}"
         await interaction.followup.send("⏳ Criando canal de teste...", ephemeral=True)
         await entregar_produto(interaction.user, produto_teste, pedido_id, guild, dados_arquivo_override=conteudo, nome_arquivo_override="teste_nexzy.txt")
         await interaction.edit_original_response(content="✅ Canal de teste criado! Verifique o servidor.")
+
     @discord.ui.button(label="📊 Estatísticas", style=discord.ButtonStyle.secondary)
     async def stats(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
@@ -557,13 +577,18 @@ class AdminView(discord.ui.View):
 async def iniciar_pagamento(interaction: discord.Interaction, produto_id: str):
     produtos = await get_produtos()
     produto = produtos.get(produto_id)
-    if not produto: return await interaction.followup.send("❌ Produto não encontrado.", ephemeral=True)
+    if not produto:
+        return await interaction.followup.send("❌ Produto não encontrado.", ephemeral=True)
     try:
         payment_data = {
             "transaction_amount": float(produto["preco"]),
             "description": f"{produto['nome']} - Nexzy Store",
             "payment_method_id": "pix",
-            "payer": {"email": f"nexzy_{interaction.user.id}@nexzystore.com.br", "first_name": (interaction.user.name or "Cliente")[:50], "identification": {"type": "CPF", "number": "00000000000"}},
+            "payer": {
+                "email": f"nexzy_{interaction.user.id}@nexzystore.com.br",
+                "first_name": (interaction.user.name or "Cliente")[:50],
+                "identification": {"type": "CPF", "number": "00000000000"}
+            },
             "statement_descriptor": "NEXZY STORE"
         }
         payment = sdk.payment().create(payment_data)
@@ -573,7 +598,9 @@ async def iniciar_pagamento(interaction: discord.Interaction, produto_id: str):
         pix = resp["point_of_interaction"]["transaction_data"]["qr_code"]
         pay_id = resp["id"]
         pedidos_pendentes[pay_id] = pedido_id
-        embed = criar_embed(titulo="💳 PAGAMENTO VIA PIX", descricao=f"**{produto['emoji']} {produto['nome']}**\n💰 **{formatar_preco(produto['preco'])}**", cor=COR_PENDENTE)
+        embed = criar_embed(titulo="💳 PAGAMENTO VIA PIX",
+                            descricao=f"**{produto['emoji']} {produto['nome']}**\n💰 **{formatar_preco(produto['preco'])}**",
+                            cor=COR_PENDENTE)
         embed.add_field(name="🏢 Destinatário", value="**NEXZY STORE**", inline=True)
         embed.add_field(name="⏰ Validade", value="**30 minutos**", inline=True)
         embed.add_field(name="📋 Código PIX", value=f"```\n{pix[:300]}\n```", inline=False)
@@ -606,11 +633,15 @@ async def verificar_pagamento(payment_id, pedido_id, user, produto, guild):
 # ================= EMBEDS LOJA / VENDAS =================
 async def montar_embed_loja():
     produtos = await get_produtos()
-    embed = criar_embed(title="**🖤  N E X Z Y  S T O R E**", description="╔══════════════════════════╗\n💎 **Compre via PIX e receba em canal exclusivo!**\n🔐 Arquivo criptografado + senha única\n╚══════════════════════════╝", cor=0x1a1a1a)
+    embed = criar_embed(title="**🖤  N E X Z Y  S T O R E**",
+                        description="╔══════════════════════════╗\n💎 **Compre via PIX e receba em canal exclusivo!**\n🔐 Arquivo criptografado + senha única\n╚══════════════════════════╝",
+                        cor=0x1a1a1a)
     for pid, p in produtos.items():
         desc = p.get("descricao") or ""
         arquivo = "📂 Arquivo incluído" if p.get("arquivo_nome") else "🔑 Acesso imediato"
-        embed.add_field(name=f"{p['emoji']}  {p['nome']}", value=f"**{formatar_preco(p['preco'])}**\n🆔 `{pid}`\n{arquivo}" + (f"\n> {desc}" if desc else ""), inline=True)
+        embed.add_field(name=f"{p['emoji']}  {p['nome']}",
+                        value=f"**{formatar_preco(p['preco'])}**\n🆔 `{pid}`\n{arquivo}" + (f"\n> {desc}" if desc else ""),
+                        inline=True)
     embed.set_footer(text="⚫ NEXZY STORE • Clique em 💰 COMPRAR")
     embed.timestamp = datetime.utcnow()
     return embed
@@ -623,34 +654,36 @@ async def montar_embed_vendas():
     embed.add_field(name="📈 Ticket Médio", value=formatar_preco(total/qtd) if qtd else "R$ 0,00", inline=True)
     return embed
 
-# ================= FUNÇÕES DE ATUALIZAÇÃO (CORRIGIDAS) =================
+# ================= ATUALIZAÇÕES (100% corrigidas) =================
 async def atualizar_loja():
     canal = bot.get_channel(CANAL_LOJA)
-    if canal:
-        async for msg in canal.history(limit=10):
-            if msg.author == bot.user:
-                try:
-                    await msg.delete()
-                except:
-                    pass
-        await canal.send(embed=await montar_embed_loja(), view=LojaButtons())
+    if not canal:
+        return
+    async for msg in canal.history(limit=10):
+        if msg.author == bot.user:
+            try:
+                await msg.delete()
+            except:
+                pass
+    await canal.send(embed=await montar_embed_loja(), view=LojaButtons())
 
 async def atualizar_vendas():
     canal = bot.get_channel(CANAL_VENDAS)
-    if canal:
-        async for msg in canal.history(limit=10):
-            if msg.author == bot.user:
-                try:
-                    await msg.delete()
-                except:
-                    pass
-        await canal.send(embed=await montar_embed_vendas())
+    if not canal:
+        return
+    async for msg in canal.history(limit=10):
+        if msg.author == bot.user:
+            try:
+                await msg.delete()
+            except:
+                pass
+    await canal.send(embed=await montar_embed_vendas())
 
 # ================= WEBHOOK MP =================
 async def webhook_mp(request):
     try:
         data = await request.json()
-        pay_id = data["data"]["id"] if data.get("type") == "payment" else None
+        pay_id = data.get("data", {}).get("id") if data.get("type") == "payment" else None
         if pay_id and pay_id in pedidos_pendentes:
             info = sdk.payment().get(pay_id)
             if info["response"].get("status") == "approved":
@@ -682,27 +715,39 @@ async def start_server():
     await site.start()
     print("✅ Servidor HTTP ativo")
 
-# ================= COMANDOS =================
+# ================= COMANDOS (try/except corrigidos) =================
 @bot.command(name="loja")
 async def cmd_loja(ctx):
     await ctx.send(embed=await montar_embed_loja(), view=LojaButtons())
-    try: await ctx.message.delete() except: pass
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
 @bot.command(name="vendas")
 async def cmd_vendas(ctx):
-    if not any(r.id == CARGO_DONO for r in ctx.author.roles): return
+    if not any(r.id == CARGO_DONO for r in ctx.author.roles):
+        return
     await ctx.send(embed=await montar_embed_vendas())
-    try: await ctx.message.delete() except: pass
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
 @bot.command(name="upload")
 async def cmd_upload(ctx, produto_id: str = None):
-    if not any(r.id == CARGO_DONO for r in ctx.author.roles): return await ctx.reply("❌ Sem permissão.", delete_after=5)
-    if not produto_id: return await ctx.reply("❌ Uso: `!upload <produto_id>` com arquivo anexado.", delete_after=15)
-    if not ctx.message.attachments: return await ctx.reply("❌ Nenhum arquivo anexado.", delete_after=10)
+    if not any(r.id == CARGO_DONO for r in ctx.author.roles):
+        return await ctx.reply("❌ Sem permissão.", delete_after=5)
+    if not produto_id:
+        return await ctx.reply("❌ Uso: `!upload <produto_id>` com arquivo anexado.", delete_after=15)
+    if not ctx.message.attachments:
+        return await ctx.reply("❌ Nenhum arquivo anexado.", delete_after=10)
     produtos = await get_produtos()
-    if produto_id not in produtos: return await ctx.reply(f"❌ Produto `{produto_id}` não encontrado.\nIDs: {', '.join(produtos.keys())}", delete_after=15)
+    if produto_id not in produtos:
+        return await ctx.reply(f"❌ Produto `{produto_id}` não encontrado.\nIDs: {', '.join(produtos.keys())}", delete_after=15)
     att = ctx.message.attachments[0]
-    if att.size/1024/1024 > 25: return await ctx.reply(f"❌ Arquivo muito grande: **{att.size/1024/1024:.1f} MB**", delete_after=15)
+    if att.size/1024/1024 > 25:
+        return await ctx.reply(f"❌ Arquivo muito grande: **{att.size/1024/1024:.1f} MB**", delete_after=15)
     msg = await ctx.reply(f"⏳ Salvando **{att.filename}**...")
     try:
         dados = await att.read()
@@ -715,8 +760,10 @@ async def cmd_upload(ctx, produto_id: str = None):
 
 @bot.command(name="remover_arquivo")
 async def cmd_remover_arquivo(ctx, produto_id: str = None):
-    if not any(r.id == CARGO_DONO for r in ctx.author.roles): return
-    if not produto_id: return await ctx.reply("❌ Use: `!remover_arquivo <produto_id>`")
+    if not any(r.id == CARGO_DONO for r in ctx.author.roles):
+        return
+    if not produto_id:
+        return await ctx.reply("❌ Use: `!remover_arquivo <produto_id>`")
     await remover_arquivo_produto(produto_id)
     await ctx.reply(f"✅ Arquivo removido do produto `{produto_id}`.")
     await atualizar_loja()
@@ -724,7 +771,8 @@ async def cmd_remover_arquivo(ctx, produto_id: str = None):
 
 @bot.command(name="check7z")
 async def cmd_check7z(ctx):
-    if not any(r.id == CARGO_DONO for r in ctx.author.roles): return
+    if not any(r.id == CARGO_DONO for r in ctx.author.roles):
+        return
     ok = verificar_7zip()
     if ok:
         result = subprocess.run(["7z", "i"], capture_output=True, text=True, timeout=5)
@@ -736,12 +784,17 @@ async def cmd_check7z(ctx):
 @bot.event
 async def on_ready():
     print(f"✅ Bot online: {bot.user}")
-    if not await init_db(): return
-    if not verificar_7zip(): print("⚠️  7-Zip NÃO encontrado!")
-    else: print("✅ 7-Zip disponível")
+    if not await init_db():
+        return
+    if not verificar_7zip():
+        print("⚠️  7-Zip NÃO encontrado!")
+    else:
+        print("✅ 7-Zip disponível")
     guild = await get_guild()
-    if guild is None: print(f"❌ Servidor {GUILD_ID} não encontrado. Configure GUILD_ID!")
-    else: print(f"✅ Servidor: {guild.name}")
+    if guild is None:
+        print(f"❌ Servidor {GUILD_ID} não encontrado. Configure GUILD_ID!")
+    else:
+        print(f"✅ Servidor: {guild.name}")
     asyncio.create_task(start_server())
     await atualizar_loja()
     await atualizar_vendas()
@@ -749,7 +802,8 @@ async def on_ready():
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
-    if interaction.type != discord.InteractionType.component: return
+    if interaction.type != discord.InteractionType.component:
+        return
     custom_id = interaction.data.get("custom_id", "")
     if custom_id.startswith("check_"):
         pay_id = int(custom_id.split("_")[1])
@@ -759,7 +813,8 @@ async def on_interaction(interaction: discord.Interaction):
             status = info["response"].get("status")
             msgs = {"approved": "✅ Pagamento aprovado!", "pending": "⏳ Pendente.", "rejected": "❌ Recusado."}
             await interaction.followup.send(msgs.get(status, f"ℹ️ Status: `{status}`"), ephemeral=True)
-        except: await interaction.followup.send("❌ Erro ao verificar.", ephemeral=True)
+        except:
+            await interaction.followup.send("❌ Erro ao verificar.", ephemeral=True)
     elif custom_id.startswith("cancel_"):
         await interaction.response.send_message("❌ Pedido cancelado.", ephemeral=True)
 
