@@ -1,11 +1,15 @@
 FROM python:3.11-slim
 
-# Instala dependências do sistema (PostgreSQL, 7zip, compiladores)
+# Instala dependências do sistema
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
     p7zip-full \
+    p7zip-rar \
     && rm -rf /var/lib/apt/lists/*
+
+# Verifica se o 7z foi instalado
+RUN 7z --help
 
 WORKDIR /app
 
@@ -17,4 +21,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py .
 
 # Comando com restart automático
-CMD ["sh", "-c", "while true; do python bot.py; echo 'Bot caiu, reiniciando em 5 segundos...'; sleep 5; done"]
+CMD ["sh", "-c", "while true; do python bot.py; echo 'Reiniciando...'; sleep 5; done"]
