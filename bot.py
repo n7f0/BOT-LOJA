@@ -1,4 +1,4 @@
-# bot.py - NEXZY STORE - FINAL CORRIGIDO (titulo)
+# bot.py - NEXZY STORE - FINAL COM 7ZIP AUTO + KEY ÚNICA + 5 MINUTOS
 import discord
 from discord.ext import commands
 from discord import Embed, Color
@@ -63,6 +63,19 @@ def formatar_preco(v):
 
 def verificar_7zip():
     return shutil.which("7z") is not None
+
+def instalar_7zip():
+    """Tenta instalar o 7-Zip automaticamente"""
+    try:
+        subprocess.run(["apt-get", "update"], capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            ["apt-get", "install", "-y", "p7zip-full"],
+            capture_output=True, text=True, timeout=120
+        )
+        return result.returncode == 0
+    except Exception as e:
+        print(f"Erro ao instalar 7-Zip: {e}")
+        return False
 
 def criar_embed(titulo="", descricao="", cor=COR_PRINCIPAL):
     embed = Embed(title=titulo, description=descricao, color=cor)
@@ -206,6 +219,7 @@ async def log_venda(pedido_id, user, produto, valor, senha_arquivo=None):
     embed.add_field(name="📦 Produto", value=produto, inline=True)
     embed.add_field(name="💰 Valor", value=formatar_preco(valor), inline=True)
     embed.add_field(name="🔐 Senha", value=f"`{senha_arquivo}`" if senha_arquivo else "Sem arquivo", inline=False)
+    embed.add_field(name="⏰ Canal", value="Expira em 5 minutos", inline=True)
     await canal.send(embed=embed)
 
 async def log_admin(acao, admin, detalhes, cor=COR_DESTAQUE):
@@ -238,7 +252,7 @@ async def criar_7z_criptografado(dados: bytes, nome_original: str, senha: str) -
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _criar_7z_sync, dados, nome_original, senha)
 
-# ================= ENTREGA VIA CANAL TEMPORÁRIO (CORRIGIDA) =================
+# ================= ENTREGA VIA CANAL TEMPORÁRIO (5 MIN + KEY ÚNICA) =================
 async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arquivo_override: bytes = None, nome_arquivo_override: str = None):
     
     senha_arquivo = None
@@ -295,7 +309,8 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
         title="🖤  NEXZY STORE — COMPRA APROVADA",
         description=(
             f"> Olá, **{user.display_name}**! Seu pagamento foi **confirmado**.\n"
-            f"> Este canal será excluído em **30 minutos**."
+            f"> ⚠️ **Este canal será excluído em 5 minutos!**\n"
+            f"> 🔐 **A key é de uso único** — após extrair, o canal será destruído."
         ),
         color=0x2b2b2b
     )
@@ -311,20 +326,27 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
         embed.add_field(
             name="**📂  Como extrair**",
             value=(
-                "**1.** Baixe o arquivo `.7z` abaixo\n"
+                "**1.** Baixe o arquivo `.7z` abaixo **AGORA**\n"
                 "**2.** Instale o **[7-Zip](https://7-zip.org)** (gratuito)\n"
                 "**3.** Clique com botão direito → *7-Zip → Extrair aqui*\n"
                 "**4.** Insira a senha acima\n\n"
-                "⚠️ **Arquivo exclusivo para esta compra.**"
+                "⚠️ **KEY DE USO ÚNICO** — Após 5 minutos o canal será **DELETADO**\n"
+                "⚠️ **Este arquivo é exclusivo para esta compra.**"
             ),
             inline=False
         )
-        embed.set_footer(text="⚫ NEXZY STORE  •  Suporte disponível via ticket")
+        embed.set_footer(text="⚫ NEXZY STORE  •  5 minutos para baixar!")
         embed.timestamp = datetime.utcnow()
 
         try:
             if not verificar_7zip():
-                raise RuntimeError("7-Zip não encontrado. Execute: apt install p7zip-full")
+                # Tenta instalar automaticamente
+                print("⏳ 7-Zip não encontrado. Tentando instalar...")
+                if instalar_7zip():
+                    print("✅ 7-Zip instalado com sucesso!")
+                else:
+                    raise RuntimeError("7-Zip não encontrado e não foi possível instalar automaticamente.")
+            
             dados_cifrados = await criar_7z_criptografado(dados_raw, nome_original, senha_arquivo)
             nome_saida = f"nexzy_{produto['id']}_{pedido_id[:8]}.7z"
             arquivo_discord = discord.File(fp=io.BytesIO(dados_cifrados), filename=nome_saida)
@@ -343,14 +365,15 @@ async def entregar_produto(user, produto: dict, pedido_id: str, guild, dados_arq
                 ))
     else:
         embed.add_field(name="**✅  Próximos passos**", value="Produto ativado. Abra um ticket se precisar.", inline=False)
-        embed.set_footer(text="⚫ NEXZY STORE  •  Suporte disponível via ticket")
+        embed.set_footer(text="⚫ NEXZY STORE  •  5 minutos para baixar!")
         embed.timestamp = datetime.utcnow()
         await canal_temp.send(embed=embed)
 
+    # Exclusão após 5 minutos (300 segundos)
     async def remover_canal():
-        await asyncio.sleep(1800)
+        await asyncio.sleep(300)  # 5 minutos
         try:
-            await canal_temp.delete(reason="Canal de entrega expirado")
+            await canal_temp.delete(reason="Canal de entrega expirado (5 min) — Key de uso único")
         except:
             pass
     asyncio.create_task(remover_canal())
@@ -506,6 +529,7 @@ class LojaButtons(discord.ui.View):
         embed.add_field(name="🧪 Teste de Entrega", value="Envia `teste_nexzy.txt`", inline=True)
         embed.add_field(name="📊 Estatísticas", value="Faturamento", inline=True)
         embed.add_field(name="📂 Upload", value="`!upload <id>`", inline=True)
+        embed.add_field(name="🔧 Instalar 7-Zip", value="`!instalar7z`", inline=True)
         await interaction.response.send_message(embed=embed, view=AdminView(), ephemeral=True)
 
 class AdminView(discord.ui.View):
@@ -561,12 +585,12 @@ class AdminView(discord.ui.View):
         guild = interaction.guild or await get_guild()
         if not guild:
             return await interaction.followup.send("❌ Servidor não encontrado.", ephemeral=True)
-        conteudo = b"Arquivo de teste da Nexzy Store.\nSe voce esta vendo isso, a entrega funcionou!"
+        conteudo = b"Arquivo de teste da Nexzy Store.\nSe voce esta vendo isso, a entrega funcionou!\nKey de uso unico - Canal expira em 5 minutos."
         produto_teste = {"id":"teste","nome":"Produto de Teste","preco":0.0,"emoji":"🧪"}
         pedido_id = f"TESTE-{uuid.uuid4().hex[:8]}"
-        await interaction.followup.send("⏳ Criando canal de teste...", ephemeral=True)
+        await interaction.followup.send("⏳ Criando canal de teste (5 min)...", ephemeral=True)
         await entregar_produto(interaction.user, produto_teste, pedido_id, guild, dados_arquivo_override=conteudo, nome_arquivo_override="teste_nexzy.txt")
-        await interaction.edit_original_response(content="✅ Canal de teste criado! Verifique o servidor.")
+        await interaction.edit_original_response(content="✅ Canal de teste criado! Expira em 5 minutos.")
 
     @discord.ui.button(label="📊 Estatísticas", style=discord.ButtonStyle.secondary)
     async def stats(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -634,7 +658,7 @@ async def verificar_pagamento(payment_id, pedido_id, user, produto, guild):
 async def montar_embed_loja():
     produtos = await get_produtos()
     embed = criar_embed(titulo="**🖤  N E X Z Y  S T O R E**",
-                        descricao="╔══════════════════════════╗\n💎 **Compre via PIX e receba em canal exclusivo!**\n🔐 Arquivo criptografado + senha única\n╚══════════════════════════╝",
+                        descricao="╔══════════════════════════╗\n💎 **Compre via PIX e receba em canal exclusivo!**\n🔐 Arquivo criptografado + senha única\n⏰ Canal expira em **5 minutos**\n╚══════════════════════════╝",
                         cor=0x1a1a1a)
     for pid, p in produtos.items():
         desc = p.get("descricao") or ""
@@ -654,7 +678,7 @@ async def montar_embed_vendas():
     embed.add_field(name="📈 Ticket Médio", value=formatar_preco(total/qtd) if qtd else "R$ 0,00", inline=True)
     return embed
 
-# ================= ATUALIZAÇÕES (100% corrigidas) =================
+# ================= ATUALIZAÇÕES =================
 async def atualizar_loja():
     canal = bot.get_channel(CANAL_LOJA)
     if not canal:
@@ -778,7 +802,7 @@ async def cmd_check7z(ctx):
         result = subprocess.run(["7z", "i"], capture_output=True, text=True, timeout=5)
         await ctx.reply(f"✅ **7-Zip instalado!**\n`{result.stdout.strip()}`")
     else:
-        await ctx.reply("❌ **7-Zip NÃO encontrado.**")
+        await ctx.reply("❌ **7-Zip NÃO encontrado.** Use `!instalar7z` para instalar.")
 
 @bot.command(name="instalar7z")
 async def cmd_instalar7z(ctx):
@@ -789,31 +813,14 @@ async def cmd_instalar7z(ctx):
     msg = await ctx.reply("⏳ Instalando 7-Zip... (isso pode levar 30 segundos)")
     
     try:
-        # Instala o 7-Zip
-        result = subprocess.run(
-            ["apt-get", "update"],
-            capture_output=True, text=True, timeout=60
-        )
-        
-        result = subprocess.run(
-            ["apt-get", "install", "-y", "p7zip-full"],
-            capture_output=True, text=True, timeout=120
-        )
-        
-        if result.returncode == 0:
-            # Verifica se funciona
-            test = subprocess.run(
-                ["7z", "--help"],
-                capture_output=True, text=True, timeout=5
-            )
-            
-            if test.returncode == 0:
+        if instalar_7zip():
+            if verificar_7zip():
                 await msg.edit(content="✅ **7-Zip instalado com sucesso!**\nAgora os testes de entrega vão funcionar!")
                 await log_admin("7-Zip Instalado", ctx.author, "Instalação concluída com sucesso")
             else:
                 await msg.edit(content="⚠️ Instalação concluída mas 7z não respondeu. Tente reiniciar o bot.")
         else:
-            await msg.edit(content=f"❌ Erro na instalação:\n```{result.stderr[:300]}```")
+            await msg.edit(content="❌ Falha na instalação. Tente novamente ou use o terminal do Railway.")
             
     except Exception as e:
         await msg.edit(content=f"❌ Erro ao executar: {e}")
@@ -824,20 +831,29 @@ async def on_ready():
     print(f"✅ Bot online: {bot.user}")
     if not await init_db():
         return
+    
+    # Verifica e tenta instalar 7-Zip automaticamente
     if not verificar_7zip():
-        print("⚠️  7-Zip NÃO encontrado!")
+        print("⚠️  7-Zip NÃO encontrado! Tentando instalar automaticamente...")
+        if instalar_7zip():
+            print("✅ 7-Zip instalado com sucesso!")
+        else:
+            print("❌ Não foi possível instalar o 7-Zip. Use !instalar7z.")
     else:
         print("✅ 7-Zip disponível")
+    
     guild = await get_guild()
     if guild is None:
         print(f"❌ Servidor {GUILD_ID} não encontrado. Configure GUILD_ID!")
     else:
         print(f"✅ Servidor: {guild.name}")
+    
     asyncio.create_task(start_server())
-    # só atualiza loja/vendas se guild existir
+    
     if guild:
         await atualizar_loja()
         await atualizar_vendas()
+    
     print("✅ Pronto!")
 
 @bot.event
@@ -851,7 +867,7 @@ async def on_interaction(interaction: discord.Interaction):
         try:
             info = sdk.payment().get(pay_id)
             status = info["response"].get("status")
-            msgs = {"approved": "✅ Pagamento aprovado!", "pending": "⏳ Pendente.", "rejected": "❌ Recusado."}
+            msgs = {"approved": "✅ Pagamento aprovado! Canal criado por 5 minutos.", "pending": "⏳ Pendente.", "rejected": "❌ Recusado."}
             await interaction.followup.send(msgs.get(status, f"ℹ️ Status: `{status}`"), ephemeral=True)
         except:
             await interaction.followup.send("❌ Erro ao verificar.", ephemeral=True)
