@@ -1,4 +1,4 @@
-# bot.py - NEXZY STORE - VERSÃO FINAL CORRIGIDA
+# bot.py - NEXZY STORE - VERSÃO FINAL CORRIGIDA (SINTAXE OK)
 import discord
 from discord.ext import commands
 from discord import Embed, Color
@@ -623,18 +623,27 @@ async def montar_embed_vendas():
     embed.add_field(name="📈 Ticket Médio", value=formatar_preco(total/qtd) if qtd else "R$ 0,00", inline=True)
     return embed
 
+# ================= FUNÇÕES DE ATUALIZAÇÃO (CORRIGIDAS) =================
 async def atualizar_loja():
     canal = bot.get_channel(CANAL_LOJA)
     if canal:
         async for msg in canal.history(limit=10):
-            if msg.author == bot.user: try: await msg.delete() except: pass
+            if msg.author == bot.user:
+                try:
+                    await msg.delete()
+                except:
+                    pass
         await canal.send(embed=await montar_embed_loja(), view=LojaButtons())
 
 async def atualizar_vendas():
     canal = bot.get_channel(CANAL_VENDAS)
     if canal:
         async for msg in canal.history(limit=10):
-            if msg.author == bot.user: try: await msg.delete() except: pass
+            if msg.author == bot.user:
+                try:
+                    await msg.delete()
+                except:
+                    pass
         await canal.send(embed=await montar_embed_vendas())
 
 # ================= WEBHOOK MP =================
