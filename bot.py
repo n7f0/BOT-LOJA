@@ -12,7 +12,6 @@ from crypto import verificar_7zip, instalar_7zip
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Injeta o bot nas funções compartilhadas
 core.set_bot(bot)
 
 @bot.event
@@ -22,11 +21,8 @@ async def on_ready():
     if not verificar_7zip():
         print("⚠️ 7-Zip não encontrado. Instalando...")
         instalar_7zip()
-    # Carrega comandos admin
     await admin_commands.setup(bot)
-    # Inicia web dashboard
     asyncio.create_task(web_dashboard.start_web_server())
-    # Atualiza loja e vendas para cada guild
     for guild in bot.guilds:
         cfg = await db.get_guild_config(guild.id)
         if cfg["canal_loja"]:
