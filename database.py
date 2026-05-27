@@ -7,7 +7,6 @@ async def init_db():
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
     async with db_pool.acquire() as conn:
-        # Produtos
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS produtos (
                 id           TEXT PRIMARY KEY,
@@ -19,7 +18,6 @@ async def init_db():
                 arquivo_data BYTEA DEFAULT NULL
             )
         """)
-        # Pedidos
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS pedidos (
                 id            TEXT PRIMARY KEY,
@@ -27,11 +25,11 @@ async def init_db():
                 produto_id    TEXT NOT NULL,
                 produto_nome  TEXT NOT NULL,
                 produto_preco REAL NOT NULL,
+                guild_id      BIGINT,
                 status        TEXT DEFAULT 'pendente',
                 criado_em     TIMESTAMP DEFAULT NOW()
             )
         """)
-        # Resumo de vendas
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS vendas (
                 id         SERIAL PRIMARY KEY,
@@ -40,7 +38,6 @@ async def init_db():
             )
         """)
         await conn.execute("INSERT INTO vendas (id,total,quantidade) VALUES (1,0,0) ON CONFLICT (id) DO NOTHING")
-        # Vendas detalhadas
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS vendas_realizadas (
                 id           SERIAL PRIMARY KEY,
@@ -51,7 +48,6 @@ async def init_db():
                 criado_em    TIMESTAMP DEFAULT NOW()
             )
         """)
-        # Pagamentos (para webhook)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS pagamentos (
                 payment_id   BIGINT PRIMARY KEY,
@@ -59,7 +55,6 @@ async def init_db():
                 status       TEXT DEFAULT 'pendente'
             )
         """)
-        # Cupons
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS cupons (
                 codigo      TEXT PRIMARY KEY,
@@ -70,7 +65,6 @@ async def init_db():
                 usos_atual  INTEGER DEFAULT 0
             )
         """)
-        # Configurações por guild (para suporte multi-servidor)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS guild_config (
                 guild_id     BIGINT PRIMARY KEY,
@@ -81,16 +75,17 @@ async def init_db():
                 canal_log_admin BIGINT
             )
         """)
-        # Migra configurações antigas se existirem
         from config import DEFAULT_CARGO_DONO, DEFAULT_CANAL_LOJA, DEFAULT_CANAL_VENDAS, DEFAULT_CANAL_LOG_VENDAS, DEFAULT_CANAL_LOG_ADMIN
         if DEFAULT_CARGO_DONO:
-            await conn.execute("INSERT INTO guild_config (guild_id, cargo_dono, canal_loja, canal_vendas, canal_log_vendas, canal_log_admin) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (guild_id) DO UPDATE SET cargo_dono=$2, canal_loja=$3, canal_vendas=$4, canal_log_vendas=$5, canal_log_admin=$6",
-                               0, DEFAULT_CARGO_DONO, DEFAULT_CANAL_LOJA, DEFAULT_CANAL_VENDAS, DEFAULT_CANAL_LOG_VENDAS, DEFAULT_CANAL_LOG_ADMIN)
+            await conn.execute("""
+                INSERT INTO guild_config (guild_id, cargo_dono, canal_loja, canal_vendas, canal_log_vendas, canal_log_admin)
+                VALUES (0, $1, $2, $3, $4, $5)
+                ON CONFLICT (guild_id) DO NOTHING
+            """, DEFAULT_CARGO_DONO, DEFAULT_CANAL_LOJA, DEFAULT_CANAL_VENDAS, DEFAULT_CANAL_LOG_VENDAS, DEFAULT_CANAL_LOG_ADMIN)
     return True
 
 # ---- PRODUTOS ----
 async def get_produtos(guild_id: int = None):
-    # Se guild_id for None, retorna todos (admin global) – mas no seu caso pode filtrar
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT id, nome, preco, emoji, descricao, arquivo_nome FROM produtos")
         return {r["id"]: dict(r) for r in rows}
@@ -120,9 +115,9 @@ async def remove_produto(pid):
         await conn.execute("DELETE FROM produtos WHERE id=$1", pid)
 
 # ---- PEDIDOS ----
-async def add_pedido(pid, user_id, produto_id, nome, preco):
+async def add_pedido(pid, user_id, produto_id, nome, preco, guild_id):
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO pedidos (id, user_id, produto_id, produto_nome, produto_preco) VALUES ($1,$2,$3,$4,$5)", pid, user_id, produto_id, nome, preco)
+        await conn.execute("INSERT INTO pedidos (id, user_id, produto_id, produto_nome, produto_preco, guild_id) VALUES ($1,$2,$3,$4,$5,$6)", pid, user_id, produto_id, nome, preco, guild_id)
 
 async def update_pedido(pid, status):
     async with db_pool.acquire() as conn:
@@ -132,7 +127,7 @@ async def get_pedido(pid: str):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow("SELECT * FROM pedidos WHERE id=$1", pid)
 
-# ---- PAGAMENTOS (webhook) ----
+# ---- PAGAMENTOS ----
 async def salvar_pagamento(payment_id: int, pedido_id: str):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO pagamentos (payment_id, pedido_id) VALUES ($1,$2) ON CONFLICT (payment_id) DO UPDATE SET pedido_id=$2", payment_id, pedido_id)
@@ -184,7 +179,6 @@ async def get_guild_config(guild_id: int):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM guild_config WHERE guild_id=$1", guild_id)
         if not row:
-            # fallback para configurações globais (variáveis antigas)
             from config import DEFAULT_CARGO_DONO, DEFAULT_CANAL_LOJA, DEFAULT_CANAL_VENDAS, DEFAULT_CANAL_LOG_VENDAS, DEFAULT_CANAL_LOG_ADMIN
             return {
                 "cargo_dono": DEFAULT_CARGO_DONO,
@@ -208,7 +202,7 @@ async def set_guild_config(guild_id: int, **kwargs):
                 canal_log_admin = EXCLUDED.canal_log_admin
         """, guild_id, kwargs.get("cargo_dono"), kwargs.get("canal_loja"), kwargs.get("canal_vendas"), kwargs.get("canal_log_vendas"), kwargs.get("canal_log_admin"))
 
-# ---- LIMPEZA TOTAL (admin) ----
+# ---- LIMPEZA ----
 async def limpar_banco_completo():
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM vendas_realizadas")
