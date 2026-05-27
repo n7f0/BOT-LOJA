@@ -5,7 +5,10 @@ from utils import parse_emoji, formatar_preco, criar_embed
 from payments import criar_pagamento_pix, gerar_embed_pix
 from crypto import gerar_senha_segura
 
-# ------------------ MODAL ADICIONAR ------------------
+def gerar_id():
+    import random, string
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
 class ProdutoModal(discord.ui.Modal, title="✨ Adicionar Produto"):
     nome_input = discord.ui.TextInput(label="📦 Nome", placeholder="Ex: VIP Premium", required=True)
     preco_input = discord.ui.TextInput(label="💰 Preço", placeholder="49.90", required=True)
@@ -36,7 +39,6 @@ class ProdutoModal(discord.ui.Modal, title="✨ Adicionar Produto"):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
 
-# ------------------ MODAL EDITAR ------------------
 class EditarProdutoModal(discord.ui.Modal, title="✏️ Editar Produto"):
     def __init__(self, produto):
         super().__init__()
@@ -64,7 +66,6 @@ class EditarProdutoModal(discord.ui.Modal, title="✏️ Editar Produto"):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
 
-# ------------------ SELECTS ------------------
 class RemoverSelect(discord.ui.Select):
     def __init__(self, produtos):
         options = []
@@ -98,15 +99,12 @@ class EditarSelect(discord.ui.Select):
             return await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
         await interaction.response.send_modal(EditarProdutoModal(produto))
 
-# ------------------ MODAL CPF ------------------
 class CPFModal(discord.ui.Modal, title="🔐 Validação de CPF"):
     cpf_input = discord.ui.TextInput(label="CPF (apenas números)", placeholder="00000000000", required=True, max_length=11, min_length=11)
-
     def __init__(self, produto_id: str, produto: dict):
         super().__init__()
         self.produto_id = produto_id
         self.produto = produto
-
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         cpf = self.cpf_input.value
@@ -139,7 +137,6 @@ class CheckPaymentButton(discord.ui.Button):
         self.produto = produto
         self.user = user
         self.guild_id = guild_id
-
     async def callback(self, interaction: discord.Interaction):
         self.disabled = True
         await interaction.response.edit_message(view=self.view)
@@ -180,7 +177,6 @@ class ProdutoSelect(discord.ui.Select):
             return await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
         await interaction.response.send_modal(CPFModal(produto_id, produto))
 
-# ------------------ VIEW PRINCIPAL ------------------
 class LojaButtons(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -302,7 +298,3 @@ class ConfirmacaoLimpezaView(discord.ui.View):
         embed = criar_embed(titulo="❌ Cancelado", descricao="Banco intacto.", cor=0x4a4a4a)
         await self.interaction_original.edit_original_response(embed=embed, view=None)
         await interaction.followup.send("✅ Cancelado.", ephemeral=True)
-
-def gerar_id():
-    import random, string
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
