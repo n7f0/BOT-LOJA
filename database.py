@@ -84,7 +84,7 @@ async def init_db():
             """, DEFAULT_CARGO_DONO, DEFAULT_CANAL_LOJA, DEFAULT_CANAL_VENDAS, DEFAULT_CANAL_LOG_VENDAS, DEFAULT_CANAL_LOG_ADMIN)
     return True
 
-# ---- PRODUTOS ----
+# PRODUTOS
 async def get_produtos(guild_id: int = None):
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT id, nome, preco, emoji, descricao, arquivo_nome FROM produtos")
@@ -114,7 +114,7 @@ async def remove_produto(pid):
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM produtos WHERE id=$1", pid)
 
-# ---- PEDIDOS ----
+# PEDIDOS
 async def add_pedido(pid, user_id, produto_id, nome, preco, guild_id):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO pedidos (id, user_id, produto_id, produto_nome, produto_preco, guild_id) VALUES ($1,$2,$3,$4,$5,$6)", pid, user_id, produto_id, nome, preco, guild_id)
@@ -127,7 +127,7 @@ async def get_pedido(pid: str):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow("SELECT * FROM pedidos WHERE id=$1", pid)
 
-# ---- PAGAMENTOS ----
+# PAGAMENTOS
 async def salvar_pagamento(payment_id: int, pedido_id: str):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO pagamentos (payment_id, pedido_id) VALUES ($1,$2) ON CONFLICT (payment_id) DO UPDATE SET pedido_id=$2", payment_id, pedido_id)
@@ -141,7 +141,7 @@ async def obter_pedido_por_payment(payment_id: int):
         row = await conn.fetchrow("SELECT pedido_id FROM pagamentos WHERE payment_id=$1", payment_id)
         return row["pedido_id"] if row else None
 
-# ---- VENDAS ----
+# VENDAS
 async def get_vendas():
     async with db_pool.acquire() as conn:
         r = await conn.fetchrow("SELECT total, quantidade FROM vendas WHERE id=1")
@@ -155,12 +155,16 @@ async def registrar_venda_realizada(pedido_id, user_id, produto_nome, valor):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO vendas_realizadas (pedido_id, user_id, produto_nome, valor) VALUES ($1,$2,$3,$4)", pedido_id, user_id, produto_nome, valor)
 
+# CORREÇÃO AQUI: função get_vendas_periodo com intervalo correto
 async def get_vendas_periodo(dias: int = 30):
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT criado_em, valor FROM vendas_realizadas WHERE criado_em > NOW() - INTERVAL '$1 days'", dias)
+        rows = await conn.fetch(
+            "SELECT criado_em, valor FROM vendas_realizadas WHERE criado_em > NOW() - $1::interval",
+            f"{dias} days"
+        )
         return rows
 
-# ---- CUPONS ----
+# CUPONS
 async def validar_cupom(codigo: str):
     async with db_pool.acquire() as conn:
         cupom = await conn.fetchrow("SELECT * FROM cupons WHERE codigo=$1 AND (validade IS NULL OR validade > NOW()) AND usos_atual < usos_maximo", codigo)
@@ -174,7 +178,7 @@ async def criar_cupom(codigo, tipo, valor, validade=None, usos_maximo=1):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO cupons (codigo, tipo, valor, validade, usos_maximo) VALUES ($1,$2,$3,$4,$5)", codigo, tipo, valor, validade, usos_maximo)
 
-# ---- CONFIGURAÇÕES POR GUILD ----
+# CONFIGURAÇÕES GUILD
 async def get_guild_config(guild_id: int):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM guild_config WHERE guild_id=$1", guild_id)
@@ -202,7 +206,7 @@ async def set_guild_config(guild_id: int, **kwargs):
                 canal_log_admin = EXCLUDED.canal_log_admin
         """, guild_id, kwargs.get("cargo_dono"), kwargs.get("canal_loja"), kwargs.get("canal_vendas"), kwargs.get("canal_log_vendas"), kwargs.get("canal_log_admin"))
 
-# ---- LIMPEZA ----
+# LIMPEZA
 async def limpar_banco_completo():
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM vendas_realizadas")
