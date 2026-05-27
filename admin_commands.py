@@ -3,7 +3,7 @@ from discord.ext import commands
 import database as db
 from crypto import validar_arquivo_seguro, verificar_7zip, instalar_7zip
 from utils import log_admin, formatar_preco
-from bot import atualizar_loja_global  # atenção: isso pode causar import circular – melhor resolver depois
+from core import atualizar_loja, atualizar_vendas
 
 class AdminCommands(commands.Cog):
     def __init__(self, bot):
@@ -35,7 +35,7 @@ class AdminCommands(commands.Cog):
         try:
             await db.salvar_arquivo_produto(produto_id, att.filename, dados)
             await msg.edit(content=f"✅ Arquivo **{att.filename}** salvo!\nProduto: `{produto_id}` — **{produtos[produto_id]['nome']}**")
-            await atualizar_loja_global(ctx.guild.id)
+            await atualizar_loja(ctx.guild.id)
             await log_admin(self.bot, "Upload de Arquivo", ctx.author, f"**{att.filename}** • Produto `{produto_id}`", guild_id=ctx.guild.id)
         except Exception as e:
             await msg.edit(content=f"❌ Erro: {e}")
@@ -46,7 +46,7 @@ class AdminCommands(commands.Cog):
             return await ctx.reply("❌ Use: `!remover_arquivo <produto_id>`")
         await db.remover_arquivo_produto(produto_id)
         await ctx.reply(f"✅ Arquivo removido do produto `{produto_id}`.")
-        await atualizar_loja_global(ctx.guild.id)
+        await atualizar_loja(ctx.guild.id)
         await log_admin(self.bot, "Arquivo Removido", ctx.author, f"Produto `{produto_id}`", guild_id=ctx.guild.id)
 
     @commands.command(name="check7z")
@@ -90,7 +90,6 @@ class AdminCommands(commands.Cog):
 
     @commands.command(name="setconfig")
     async def setconfig(self, ctx, tipo: str, canal: discord.TextChannel = None):
-        """!setconfig loja #canal | !setconfig vendas #canal | !setconfig log_vendas #canal | !setconfig log_admin #canal | !setconfig cargo_dono @Cargo"""
         if tipo == "cargo_dono":
             if not canal:
                 return await ctx.reply("Menção um cargo: `!setconfig cargo_dono @Admin`")
@@ -103,8 +102,7 @@ class AdminCommands(commands.Cog):
             await db.set_guild_config(ctx.guild.id, **{mapping[tipo]: canal.id})
             await ctx.reply(f"✅ Canal {tipo} definido para {canal.mention}")
             if tipo == "loja":
-                from bot import atualizar_loja_global
-                await atualizar_loja_global(ctx.guild.id)
+                await atualizar_loja(ctx.guild.id)
         else:
             await ctx.reply("Tipos válidos: loja, vendas, log_vendas, log_admin, cargo_dono")
 
