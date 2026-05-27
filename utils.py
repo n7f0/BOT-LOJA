@@ -4,7 +4,6 @@ import discord
 from config import COR_PRINCIPAL, COR_SUCESSO, COR_ERRO, COR_PENDENTE, COR_DESTAQUE
 
 def sanitizar_nome_canal(nome: str) -> str:
-    # Remove caracteres não permitidos e limita a 32 caracteres (máximo Discord)
     safe = re.sub(r'[^a-z0-9-]', '-', nome.lower())
     safe = re.sub(r'-+', '-', safe).strip('-')
     return safe[:32]
@@ -25,6 +24,9 @@ def parse_emoji(emoji_str: str):
         emoji_id = int(match.group(3))
         return discord.PartialEmoji(animated=animated, name=name, id=emoji_id)
     return emoji_str
+
+def formatar_preco(v):
+    return f"R$ {float(v):.2f}".replace(".", ",")
 
 async def log_venda(bot, pedido_id, user, produto, valor, senha_arquivo=None, guild_id=None):
     from database import get_guild_config
@@ -49,6 +51,3 @@ async def log_admin(bot, acao, admin, detalhes, cor=COR_DESTAQUE, guild_id=None)
     embed = criar_embed(titulo=f"⚙️ ADMIN • {acao}", descricao=detalhes, cor=cor)
     embed.add_field(name="👑 Admin", value=f"<@{admin.id}> ({admin.name})", inline=True)
     await canal.send(embed=embed)
-
-def formatar_preco(v):
-    return f"R$ {float(v):.2f}".replace(".", ",")
