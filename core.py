@@ -83,7 +83,6 @@ async def atualizar_loja(guild_id: int):
     if not canal:
         return
     embed = await montar_embed_loja(guild_id)
-    # Buscar mensagem existente (simplificado: apaga e envia nova)
     async for msg in canal.history(limit=10):
         if msg.author == _bot.user:
             try:
