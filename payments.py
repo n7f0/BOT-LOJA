@@ -2,19 +2,15 @@ import hmac
 import hashlib
 import base64
 import io
-from aiohttp import web
 import discord
 from mercadopago import SDK
 from config import MP_TOKEN, MP_WEBHOOK_SECRET
-import database as db
 
 sdk = SDK(MP_TOKEN)
 
 def is_valid_webhook_signature(body: bytes, signature_header: str, secret: str) -> bool:
-    """Valida a assinatura do webhook do Mercado Pago (x-signature)."""
     if not signature_header:
         return False
-    # O header x-signature tem formato: ts=<timestamp>, v1=<hash>
     try:
         parts = dict(item.split('=') for item in signature_header.split(','))
         ts = parts['ts']
@@ -43,6 +39,7 @@ async def criar_pagamento_pix(produto: dict, user_id: int, user_name: str, cpf: 
     return resp
 
 async def gerar_embed_pix(produto: dict, payment_response: dict, pedido_id: str, desconto_info: str = ""):
+    from utils import formatar_preco
     pix_data = payment_response["point_of_interaction"]["transaction_data"]
     qr_code_base64 = pix_data.get("qr_code_base64")
     qr_code_text = pix_data["qr_code"]
@@ -57,7 +54,6 @@ async def gerar_embed_pix(produto: dict, payment_response: dict, pedido_id: str,
     embed.add_field(name="🆔 Pedido", value=f"`{pedido_id}`", inline=False)
 
     if qr_code_base64:
-        # Exibe QR Code como imagem
         qr_bytes = base64.b64decode(qr_code_base64)
         qr_file = discord.File(io.BytesIO(qr_bytes), filename="qrcode.png")
         embed.set_image(url="attachment://qrcode.png")
@@ -68,6 +64,3 @@ async def gerar_embed_pix(produto: dict, payment_response: dict, pedido_id: str,
         embed.add_field(name="📋 Código PIX", value=f"```\n{qr_code_text[:300]}\n```", inline=False)
         embed.add_field(name="📌 Instruções", value="Copie o código e pague no seu banco", inline=False)
         return embed, None
-
-def formatar_preco(v):
-    return f"R$ {float(v):.2f}".replace(".", ",")
