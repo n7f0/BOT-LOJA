@@ -7,6 +7,7 @@ async def init_db():
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
     async with db_pool.acquire() as conn:
+        # Tabela produtos
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS produtos (
                 id           TEXT PRIMARY KEY,
@@ -18,6 +19,8 @@ async def init_db():
                 arquivo_data BYTEA DEFAULT NULL
             )
         """)
+        
+        # Tabela pedidos (com guild_id)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS pedidos (
                 id            TEXT PRIMARY KEY,
@@ -30,6 +33,20 @@ async def init_db():
                 criado_em     TIMESTAMP DEFAULT NOW()
             )
         """)
+        
+        # Verifica se a coluna guild_id existe; se não, adiciona (para tabelas antigas)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                               WHERE table_name='pedidos' AND column_name='guild_id') THEN
+                    ALTER TABLE pedidos ADD COLUMN guild_id BIGINT;
+                END IF;
+            END
+            $$;
+        """)
+        
+        # Tabela vendas (resumo)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS vendas (
                 id         SERIAL PRIMARY KEY,
@@ -38,6 +55,8 @@ async def init_db():
             )
         """)
         await conn.execute("INSERT INTO vendas (id,total,quantidade) VALUES (1,0,0) ON CONFLICT (id) DO NOTHING")
+        
+        # Tabela vendas_realizadas (detalhe)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS vendas_realizadas (
                 id           SERIAL PRIMARY KEY,
@@ -48,6 +67,8 @@ async def init_db():
                 criado_em    TIMESTAMP DEFAULT NOW()
             )
         """)
+        
+        # Tabela pagamentos
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS pagamentos (
                 payment_id   BIGINT PRIMARY KEY,
@@ -55,6 +76,8 @@ async def init_db():
                 status       TEXT DEFAULT 'pendente'
             )
         """)
+        
+        # Tabela cupons
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS cupons (
                 codigo      TEXT PRIMARY KEY,
@@ -65,6 +88,8 @@ async def init_db():
                 usos_atual  INTEGER DEFAULT 0
             )
         """)
+        
+        # Tabela guild_config
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS guild_config (
                 guild_id     BIGINT PRIMARY KEY,
@@ -75,6 +100,8 @@ async def init_db():
                 canal_log_admin BIGINT
             )
         """)
+        
+        # Configuração padrão (fallback)
         from config import DEFAULT_CARGO_DONO, DEFAULT_CANAL_LOJA, DEFAULT_CANAL_VENDAS, DEFAULT_CANAL_LOG_VENDAS, DEFAULT_CANAL_LOG_ADMIN
         if DEFAULT_CARGO_DONO:
             await conn.execute("""
@@ -155,7 +182,6 @@ async def registrar_venda_realizada(pedido_id, user_id, produto_nome, valor):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO vendas_realizadas (pedido_id, user_id, produto_nome, valor) VALUES ($1,$2,$3,$4)", pedido_id, user_id, produto_nome, valor)
 
-# CORREÇÃO APLICADA AQUI: consulta com sintaxe correta para intervalos
 async def get_vendas_periodo(dias: int = 30):
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
