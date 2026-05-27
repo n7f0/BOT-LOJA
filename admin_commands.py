@@ -1,8 +1,9 @@
+import discord
 from discord.ext import commands
 import database as db
 from crypto import validar_arquivo_seguro, verificar_7zip, instalar_7zip
 from utils import log_admin, formatar_preco
-from bot import atualizar_loja_global
+from bot import atualizar_loja_global  # atenção: isso pode causar import circular – melhor resolver depois
 
 class AdminCommands(commands.Cog):
     def __init__(self, bot):
@@ -26,7 +27,6 @@ class AdminCommands(commands.Cog):
         att = ctx.message.attachments[0]
         if att.size / 1024 / 1024 > 25:
             return await ctx.reply(f"❌ Arquivo muito grande: **{att.size/1024/1024:.1f} MB** (max 25MB)", delete_after=15)
-        # Validação de segurança
         dados = await att.read()
         ok, motivo = validar_arquivo_seguro(dados, att.filename)
         if not ok:
@@ -69,7 +69,6 @@ class AdminCommands(commands.Cog):
 
     @commands.command(name="criar_cupom")
     async def criar_cupom(self, ctx, codigo: str, tipo: str, valor: float, validade_dias: int = 30, usos_maximo: int = 1):
-        """Ex: !criar_cupom NEXZY10 percentual 10 30 100"""
         if tipo not in ("percentual", "fixo"):
             return await ctx.reply("Tipo deve ser `percentual` ou `fixo`")
         from datetime import datetime, timedelta
@@ -92,7 +91,6 @@ class AdminCommands(commands.Cog):
     @commands.command(name="setconfig")
     async def setconfig(self, ctx, tipo: str, canal: discord.TextChannel = None):
         """!setconfig loja #canal | !setconfig vendas #canal | !setconfig log_vendas #canal | !setconfig log_admin #canal | !setconfig cargo_dono @Cargo"""
-        cfg = await db.get_guild_config(ctx.guild.id)
         if tipo == "cargo_dono":
             if not canal:
                 return await ctx.reply("Menção um cargo: `!setconfig cargo_dono @Admin`")
@@ -105,6 +103,7 @@ class AdminCommands(commands.Cog):
             await db.set_guild_config(ctx.guild.id, **{mapping[tipo]: canal.id})
             await ctx.reply(f"✅ Canal {tipo} definido para {canal.mention}")
             if tipo == "loja":
+                from bot import atualizar_loja_global
                 await atualizar_loja_global(ctx.guild.id)
         else:
             await ctx.reply("Tipos válidos: loja, vendas, log_vendas, log_admin, cargo_dono")
