@@ -1,12 +1,11 @@
 import discord
-from discord import Embed, PartialEmoji
+import uuid
 import database as db
 from utils import parse_emoji, formatar_preco, criar_embed
 from payments import criar_pagamento_pix, gerar_embed_pix
 from crypto import gerar_senha_segura
-import uuid
 
-# ========== MODAL DE ADICIONAR PRODUTO ==========
+# ------------------ MODAL ADICIONAR ------------------
 class ProdutoModal(discord.ui.Modal, title="✨ Adicionar Produto"):
     nome_input = discord.ui.TextInput(label="📦 Nome", placeholder="Ex: VIP Premium", required=True)
     preco_input = discord.ui.TextInput(label="💰 Preço", placeholder="49.90", required=True)
@@ -30,14 +29,14 @@ class ProdutoModal(discord.ui.Modal, title="✨ Adicionar Produto"):
             embed.add_field(name="📦 Nome", value=nome, inline=True)
             embed.add_field(name="💰 Preço", value=formatar_preco(preco), inline=True)
             await interaction.followup.send(embed=embed, ephemeral=True)
-            from bot import atualizar_loja_global
-            await atualizar_loja_global(interaction.guild.id)
+            from core import atualizar_loja
+            await atualizar_loja(interaction.guild.id)
             from utils import log_admin
             await log_admin(interaction.client, "Produto Adicionado", interaction.user, f"**{nome}** • {formatar_preco(preco)} • ID `{pid}`", guild_id=interaction.guild.id)
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
 
-# ========== MODAL DE EDIÇÃO ==========
+# ------------------ MODAL EDITAR ------------------
 class EditarProdutoModal(discord.ui.Modal, title="✏️ Editar Produto"):
     def __init__(self, produto):
         super().__init__()
@@ -58,14 +57,14 @@ class EditarProdutoModal(discord.ui.Modal, title="✏️ Editar Produto"):
             descricao = self.descricao_input.value or ""
             await db.edit_produto(self.produto_id, nome, preco, emoji, descricao)
             await interaction.followup.send("✅ Produto editado!", ephemeral=True)
-            from bot import atualizar_loja_global
-            await atualizar_loja_global(interaction.guild.id)
+            from core import atualizar_loja
+            await atualizar_loja(interaction.guild.id)
             from utils import log_admin
             await log_admin(interaction.client, "Produto Editado", interaction.user, f"**{nome}** • {formatar_preco(preco)} • ID `{self.produto_id}`", guild_id=interaction.guild.id)
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
 
-# ========== SELECTS ==========
+# ------------------ SELECTS ------------------
 class RemoverSelect(discord.ui.Select):
     def __init__(self, produtos):
         options = []
@@ -80,8 +79,8 @@ class RemoverSelect(discord.ui.Select):
         nome = produto["nome"] if produto else self.values[0]
         await db.remove_produto(self.values[0])
         await interaction.followup.send(f"✅ **{nome}** removido!", ephemeral=True)
-        from bot import atualizar_loja_global
-        await atualizar_loja_global(interaction.guild.id)
+        from core import atualizar_loja
+        await atualizar_loja(interaction.guild.id)
         from utils import log_admin
         await log_admin(interaction.client, "Produto Removido", interaction.user, f"**{nome}** • ID `{self.values[0]}`", cor=0x8b0000, guild_id=interaction.guild.id)
 
@@ -99,7 +98,7 @@ class EditarSelect(discord.ui.Select):
             return await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
         await interaction.response.send_modal(EditarProdutoModal(produto))
 
-# ========== MODAL PARA CPF (antes do PIX) ==========
+# ------------------ MODAL CPF ------------------
 class CPFModal(discord.ui.Modal, title="🔐 Validação de CPF"):
     cpf_input = discord.ui.TextInput(label="CPF (apenas números)", placeholder="00000000000", required=True, max_length=11, min_length=11)
 
@@ -114,16 +113,14 @@ class CPFModal(discord.ui.Modal, title="🔐 Validação de CPF"):
         if not cpf.isdigit() or len(cpf) != 11:
             await interaction.followup.send("❌ CPF inválido. Envie 11 números.", ephemeral=True)
             return
-        # Gera o pagamento
         try:
             payment_resp = await criar_pagamento_pix(self.produto, interaction.user.id, interaction.user.name, cpf)
             payment_id = payment_resp["id"]
             pedido_id = str(uuid.uuid4())
-            await db.add_pedido(pedido_id, interaction.user.id, self.produto_id, self.produto["nome"], self.produto["preco"])
+            await db.add_pedido(pedido_id, interaction.user.id, self.produto_id, self.produto["nome"], self.produto["preco"], interaction.guild.id)
             await db.salvar_pagamento(payment_id, pedido_id)
             embed, qr_file = await gerar_embed_pix(self.produto, payment_resp, pedido_id)
             view = discord.ui.View(timeout=300)
-            # Botão de confirmação (agora desabilita após clique)
             check_button = CheckPaymentButton(payment_id, pedido_id, self.produto, interaction.user, interaction.guild.id)
             view.add_item(check_button)
             view.add_item(discord.ui.Button(label="❌ CANCELAR", style=discord.ButtonStyle.danger, custom_id=f"cancel_{payment_id}"))
@@ -144,11 +141,9 @@ class CheckPaymentButton(discord.ui.Button):
         self.guild_id = guild_id
 
     async def callback(self, interaction: discord.Interaction):
-        # Desabilita o botão imediatamente
         self.disabled = True
         await interaction.response.edit_message(view=self.view)
         await interaction.followup.send("⏳ Aguardando confirmação do banco...", ephemeral=True)
-        # Consulta o Mercado Pago
         from mercadopago import SDK
         from config import MP_TOKEN
         sdk = SDK(MP_TOKEN)
@@ -158,10 +153,10 @@ class CheckPaymentButton(discord.ui.Button):
             if status == "approved":
                 await db.update_pedido(self.pedido_id, "aprovado")
                 await db.add_venda(self.produto["preco"])
-                from bot import entregar_produto_global
+                from core import entregar_produto
                 guild = interaction.client.get_guild(self.guild_id)
                 if guild:
-                    await entregar_produto_global(self.user, self.produto, self.pedido_id, guild)
+                    await entregar_produto(self.user, self.produto, self.pedido_id, guild)
                 await interaction.followup.send("✅ Pagamento aprovado! Canal de entrega criado.", ephemeral=True)
             elif status == "pending":
                 await interaction.followup.send("⏳ Pagamento ainda pendente. Aguarde alguns minutos.", ephemeral=True)
@@ -183,10 +178,9 @@ class ProdutoSelect(discord.ui.Select):
         produto = produtos.get(produto_id)
         if not produto:
             return await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
-        # Antes de gerar PIX, pede CPF
         await interaction.response.send_modal(CPFModal(produto_id, produto))
 
-# ========== VIEW PRINCIPAL DA LOJA ==========
+# ------------------ VIEW PRINCIPAL ------------------
 class LojaButtons(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -261,22 +255,21 @@ class AdminView(discord.ui.View):
     @discord.ui.button(label="🧪 Teste de Entrega", style=discord.ButtonStyle.secondary)
     async def teste(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        from bot import entregar_produto_global
+        from core import entregar_produto
         conteudo = b"Arquivo de teste da Nexzy Store.\nKey de uso unico - Canal expira em 5 minutos."
         produto_teste = {"id":"teste","nome":"Produto de Teste","preco":0.0,"emoji":"🧪"}
         pedido_id = f"TESTE-{uuid.uuid4().hex[:8]}"
         await interaction.followup.send("⏳ Criando canal de teste (5 min)...", ephemeral=True)
-        await entregar_produto_global(interaction.user, produto_teste, pedido_id, interaction.guild, dados_arquivo_override=conteudo, nome_arquivo_override="teste_nexzy.txt")
+        await entregar_produto(interaction.user, produto_teste, pedido_id, interaction.guild, dados_arquivo_override=conteudo, nome_arquivo_override="teste_nexzy.txt")
         await interaction.edit_original_response(content="✅ Canal de teste criado! Expira em 5 minutos.")
     @discord.ui.button(label="📊 Estatísticas", style=discord.ButtonStyle.secondary)
     async def stats(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        from bot import montar_embed_vendas_global
-        await interaction.followup.send(embed=await montar_embed_vendas_global(interaction.guild.id), ephemeral=True)
+        from core import montar_embed_vendas
+        await interaction.followup.send(embed=await montar_embed_vendas(interaction.guild.id), ephemeral=True)
     @discord.ui.button(label="🎟️ Cupons", style=discord.ButtonStyle.secondary)
     async def cupons(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Placeholder – você pode implementar um menu de gerenciamento de cupons
-        await interaction.response.send_message("Função de cupons em desenvolvimento. Use `!criar_cupom`", ephemeral=True)
+        await interaction.response.send_message("Use `!criar_cupom` para criar cupons.", ephemeral=True)
 
 class ConfirmacaoLimpezaView(discord.ui.View):
     def __init__(self, interaction_original):
@@ -293,9 +286,9 @@ class ConfirmacaoLimpezaView(discord.ui.View):
             return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         await db.limpar_banco_completo()
-        from bot import atualizar_loja_global, atualizar_vendas_global
-        await atualizar_loja_global(interaction.guild.id)
-        await atualizar_vendas_global(interaction.guild.id)
+        from core import atualizar_loja, atualizar_vendas
+        await atualizar_loja(interaction.guild.id)
+        await atualizar_vendas(interaction.guild.id)
         from utils import log_admin
         await log_admin(interaction.client, "🗑️ Banco Limpo", interaction.user, "Todos os dados foram zerados.", cor=0x8b0000, guild_id=interaction.guild.id)
         embed = criar_embed(titulo="✅ Banco de Dados Limpo", descricao="Tudo foi removido.", cor=0x2d2d2d)
