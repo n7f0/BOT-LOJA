@@ -11,9 +11,13 @@ sdk = SDK(MP_TOKEN)
 
 routes = web.RouteTableDef()
 
+@routes.get('/ping')
+async def ping(request):
+    return web.Response(text="pong", status=200)
+
 @routes.get('/health')
 async def health(request):
-    return web.Response(text="OK — NEXZY STORE", status=200, headers={"Content-Type": "text/plain"})
+    return web.Response(text="OK — NEXZY STORE", status=200)
 
 @routes.get('/dashboard')
 async def dashboard(request):
