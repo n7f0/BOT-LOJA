@@ -37,7 +37,6 @@ def _criar_7z_sync(dados: bytes, nome_original: str, senha: str) -> bytes:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-# Executor limitado a 2 workers simultâneos
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 async def criar_7z_criptografado(dados: bytes, nome_original: str, senha: str) -> bytes:
@@ -45,14 +44,11 @@ async def criar_7z_criptografado(dados: bytes, nome_original: str, senha: str) -
     return await loop.run_in_executor(_executor, _criar_7z_sync, dados, nome_original, senha)
 
 def validar_arquivo_seguro(dados: bytes, nome: str) -> Tuple[bool, str]:
-    """Verifica extensão e magic number básico."""
     extensoes_permitidas = ('.txt', '.pdf', '.png', '.jpg', '.jpeg', '.zip', '.rar', '.7z', '.mp4')
     if not any(nome.lower().endswith(ext) for ext in extensoes_permitidas):
         return False, f"Extensão não permitida. Use: {', '.join(extensoes_permitidas)}"
-    # Magic numbers simples
     if nome.lower().endswith('.pdf') and not dados.startswith(b'%PDF'):
-        return False, "Arquivo PDF inválido (cabeçalho incorreto)"
+        return False, "Arquivo PDF inválido"
     if nome.lower().endswith('.zip') and not dados.startswith(b'PK'):
         return False, "Arquivo ZIP inválido"
-    # Adicione mais verificações conforme necessidade
     return True, ""
