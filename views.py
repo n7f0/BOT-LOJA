@@ -1,5 +1,6 @@
 import discord
 import uuid
+import io
 import database as db
 from utils import parse_emoji, formatar_preco, criar_embed
 from payments import criar_pagamento_pix, gerar_embed_pix
@@ -98,6 +99,36 @@ class EditarSelect(discord.ui.Select):
         if not produto:
             return await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
         await interaction.response.send_modal(EditarProdutoModal(produto))
+
+class BaixarArquivoSelect(discord.ui.Select):
+    def __init__(self, options):
+        super().__init__(placeholder="📁 Escolha um produto com arquivo...", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        produto_id = self.values[0]
+
+        async with db.db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT arquivo_data, arquivo_nome FROM produtos WHERE id=$1", produto_id)
+
+        if not row or not row["arquivo_data"]:
+            return await interaction.followup.send("❌ Arquivo não encontrado.", ephemeral=True)
+
+        dados = row["arquivo_data"]
+        nome = row["arquivo_nome"] or "arquivo.bin"
+
+        try:
+            arquivo = discord.File(io.BytesIO(dados), filename=nome)
+            await interaction.user.send(f"📥 **Download do produto `{produto_id}`**", file=arquivo)
+            await interaction.followup.send("✅ Arquivo enviado no seu privado!", ephemeral=True)
+
+            from utils import log_admin
+            await log_admin(interaction.client, "Download de Arquivo", interaction.user,
+                            f"Produto `{produto_id}` • Arquivo `{nome}`", guild_id=interaction.guild.id)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Não foi possível enviar a DM. Verifique se você permite mensagens diretas de membros do servidor.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro ao enviar: {e}", ephemeral=True)
 
 class CPFModal(discord.ui.Modal, title="🔐 Validação de CPF"):
     cpf_input = discord.ui.TextInput(label="CPF (apenas números)", placeholder="00000000000", required=True, max_length=11, min_length=11)
@@ -203,6 +234,7 @@ class LojaButtons(discord.ui.View):
         embed.add_field(name="🧪 Teste de Entrega", value="Envia teste_nexzy.txt", inline=True)
         embed.add_field(name="📊 Estatísticas", value="Faturamento", inline=True)
         embed.add_field(name="🎟️ Cupons", value="Gerenciar cupons", inline=True)
+        embed.add_field(name="📥 Baixar Arquivo", value="Baixar arquivo no privado", inline=True)
         await interaction.response.send_message(embed=embed, view=AdminView(), ephemeral=True)
 
 class AdminView(discord.ui.View):
@@ -266,6 +298,25 @@ class AdminView(discord.ui.View):
     @discord.ui.button(label="🎟️ Cupons", style=discord.ButtonStyle.secondary)
     async def cupons(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Use `!criar_cupom` para criar cupons.", ephemeral=True)
+    @discord.ui.button(label="📥 Baixar Arquivo", style=discord.ButtonStyle.secondary)
+    async def baixar_arquivo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async with db.db_pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, nome, arquivo_nome FROM produtos WHERE arquivo_data IS NOT NULL")
+        if not rows:
+            return await interaction.response.send_message("❌ Nenhum produto possui arquivo anexado.", ephemeral=True)
+        options = []
+        for row in rows:
+            options.append(
+                discord.SelectOption(
+                    label=f"{row['nome']} ({row['id']})",
+                    value=row['id'],
+                    description=f"📄 {row['arquivo_nome'][:50]}"
+                )
+            )
+        select = BaixarArquivoSelect(options)
+        view = discord.ui.View()
+        view.add_item(select)
+        await interaction.response.send_message("📁 **Selecione o produto para baixar o arquivo diretamente no seu privado:**", view=view, ephemeral=True)
 
 class ConfirmacaoLimpezaView(discord.ui.View):
     def __init__(self, interaction_original):
